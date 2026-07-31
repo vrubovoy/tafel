@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /api
+    schedule:
+      interval: weekly
+    ignore:
+      # Matches kuvert/schlussel's own ignore rule - v13 dropped prebuilt
+      # binaries entirely (always compiles from source via node-gyp now,
+      # on every platform), which broke their Docker builds after the
+      # same routine bump.
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

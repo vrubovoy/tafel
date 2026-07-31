@@ -1,0 +1,16 @@
+node_modules/
+dist/
+data/
+.env
+*.db
+*.db-shm
+*.db-wal
+
+# pnpm
+.pnpm-store/
+
+# Vite build output
+web/dist/
+
+# TypeScript build info
+*.tsbuildinfo

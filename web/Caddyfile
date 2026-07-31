@@ -1,0 +1,34 @@
+:80 {
+	root * /srv
+	encode gzip zstd
+
+	@authCallback path /auth/callback*
+	handle @authCallback {
+		try_files {path} /index.html
+		file_server
+	}
+
+	# handle_path strips the matched /api prefix before proxying, same as
+	# nginx's proxy_pass http://tafel-api:3002/ (trailing slash rewrite) -
+	# tafel-api's own routes are mounted at root, not under /api.
+	handle_path /api/* {
+		reverse_proxy tafel-api:3002
+	}
+
+	handle /auth/* {
+		# X-Schlussel-Frontend marks a request as genuinely same-origin to
+		# schlussel's own hosted frontend (see the isTrustedOrigin gate in
+		# schlussel's src/routes/auth.ts) - without stripping it here, a
+		# client could set it directly on a request through this proxy and
+		# have it forwarded unchanged, since reverse_proxy otherwise passes
+		# through whatever headers the client sent.
+		reverse_proxy schlussel:4000 {
+			header_up -X-Schlussel-Frontend
+		}
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}
