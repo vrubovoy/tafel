@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearch, useNavigate } from '@tanstack/react-router'
 import {
-  DndContext, PointerSensor, useSensor, useSensors, closestCenter, useDroppable,
-  type DragEndEvent,
+  DndContext, DragOverlay, PointerSensor, useSensor, useSensors, closestCenter, useDroppable,
+  type DragEndEvent, type DragStartEvent,
 } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -71,16 +71,51 @@ export function KanbanPage() {
   const currentProject = projects.find((p) => p.id === projectId)
   const parentTask = parentTaskId ? allProjectTasks.find((t) => t.id === parentTaskId) : null
 
+  // Optimistic: without this, a dropped card would sit frozen in its
+  // origin column until the PUT round-trips and the refetch resolves,
+  // reading as laggy/unresponsive drag-and-drop. Patches both task-list
+  // caches (the current view and the "all" one behind child-progress
+  // badges) immediately, then reconciles with the server's own result
+  // (e.g. its computed sortOrder) via the settle-time invalidate.
+  const tasksKey = ['tasks', projectId, 'parent', parentTaskId ?? '']
+  const allTasksKey = ['tasks', projectId, 'all']
+
   const reorderMutation = useMutation({
     mutationFn: ({ id, statusId, sortOrder }: { id: string; statusId: string; sortOrder: number }) =>
       api.put(`/tasks/${id}/reorder`, { statusId, sortOrder }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
-    onError: () => toast.showError('Не удалось переместить задачу'),
+    onMutate: async ({ id, statusId }) => {
+      await qc.cancelQueries({ queryKey: tasksKey })
+      await qc.cancelQueries({ queryKey: allTasksKey })
+      const previousTasks = qc.getQueryData<Task[]>(tasksKey)
+      const previousAllTasks = qc.getQueryData<Task[]>(allTasksKey)
+      const patch = (list?: Task[]) => list?.map((t) => (t.id === id ? { ...t, statusId } : t))
+      qc.setQueryData<Task[]>(tasksKey, patch(previousTasks))
+      qc.setQueryData<Task[]>(allTasksKey, patch(previousAllTasks))
+      return { previousTasks, previousAllTasks }
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previousTasks) qc.setQueryData(tasksKey, context.previousTasks)
+      if (context?.previousAllTasks) qc.setQueryData(allTasksKey, context.previousAllTasks)
+      toast.showError('Не удалось переместить задачу')
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
   })
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
 
+  // Drives the DragOverlay's floating preview - without it, the dragged
+  // card just translates in place within its own column's flow (dnd-kit's
+  // default for useSortable), which reads as sluggish once other cards
+  // have to shift around it. The overlay clone follows the pointer
+  // directly while the source card fades via KanbanCard's isDragging.
+  const [activeTask, setActiveTask] = useState<Task | null>(null)
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveTask(tasks.find((t) => t.id === String(event.active.id)) ?? null)
+  }
+
   function handleDragEnd(event: DragEndEvent) {
+    setActiveTask(null)
     const { active, over } = event
     if (!over) return
     const taskId = String(active.id)
@@ -176,8 +211,14 @@ export function KanbanPage() {
         </div>
       </div>
 
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <div style={{ display: 'flex', gap: '1rem', overflowX: 'auto', paddingBottom: '0.5rem' }}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={() => setActiveTask(null)}
+      >
+        <div style={{ display: 'flex', alignItems: 'stretch', gap: '1rem', overflowX: 'auto', paddingBottom: '0.5rem' }}>
           {statuses.map((status) => (
             <KanbanColumn
               key={status.id}
@@ -189,6 +230,13 @@ export function KanbanPage() {
             />
           ))}
         </div>
+        <DragOverlay>
+          {activeTask && (
+            <div className="card" style={{ width: 280, boxShadow: 'var(--shadow-lg)' }}>
+              <KanbanCardContent task={activeTask} progress={childCounts.get(activeTask.id)} dragging />
+            </div>
+          )}
+        </DragOverlay>
       </DndContext>
 
       <TaskFormModal
@@ -210,8 +258,12 @@ function KanbanColumn({ status, tasks, childCounts, onEdit, onDrillInto }: {
   onDrillInto: (taskId: string) => void
 }) {
   return (
-    <div style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.25rem 0.25rem 0.75rem' }}>
+    <div className="card" style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', padding: '0.75rem' }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '0.5rem',
+        padding: '0.25rem 0.25rem 0.75rem', marginBottom: '0.5rem',
+        borderBottom: '1px solid var(--border)',
+      }}>
         <div style={{ width: 8, height: 8, borderRadius: '50%', background: status.color, flexShrink: 0 }} />
         <span style={{ fontWeight: 600, fontSize: '0.8125rem', color: 'var(--text-primary)' }}>{status.name}</span>
         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{tasks.length}</span>
@@ -239,18 +291,59 @@ function KanbanColumn({ status, tasks, childCounts, onEdit, onDrillInto }: {
 // nowhere else to register as a drop target otherwise. Using the
 // status id as this element's own droppable id lets handleDragEnd read
 // `over.id` directly as the target status when dropped on empty space.
+// flex:1 stretches every column's body to the row's own height (set via
+// KanbanPage's alignItems:'stretch'), so columns read as equal-height
+// board lanes instead of shrink-wrapping to however many cards they hold.
 function DroppableColumnBody({ statusId, children }: { statusId: string; children: React.ReactNode }) {
-  const { setNodeRef } = useDroppable({ id: statusId })
+  const { setNodeRef, isOver } = useDroppable({ id: statusId })
   return (
     <div
       ref={setNodeRef}
       style={{
-        display: 'flex', flexDirection: 'column', gap: '0.5rem',
-        minHeight: 80, background: 'var(--bg-base)', borderRadius: 'var(--radius-md)',
-        padding: '0.5rem',
+        display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1,
+        minHeight: 80, background: isOver ? 'var(--accent-muted)' : 'var(--bg-base)',
+        borderRadius: 'var(--radius-md)', padding: '0.5rem',
+        transition: 'background 120ms',
       }}
     >
       {children}
+    </div>
+  )
+}
+
+function KanbanCardContent({ task, progress, onDrillInto, dragging }: {
+  task: Task
+  progress?: { total: number; done: number }
+  onDrillInto?: () => void
+  dragging?: boolean
+}) {
+  return (
+    <div style={{ padding: '0.75rem', cursor: dragging ? 'grabbing' : 'grab' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', marginBottom: task.dueDate || progress ? '0.5rem' : 0 }}>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: PRIORITY_COLORS[task.priority], flexShrink: 0, marginTop: 6 }} />
+        <span style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--text-primary)', flex: 1 }}>{task.title}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+        {task.dueDate && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
+            <CalendarIcon size={11} /> {formatDate(task.dueDate)}
+          </span>
+        )}
+        {progress && progress.total > 0 && (
+          <Badge variant={progress.done === progress.total ? 'success' : 'neutral'}>
+            {progress.done}/{progress.total}
+          </Badge>
+        )}
+        {progress && progress.total > 0 && onDrillInto && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDrillInto() }}
+            style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}
+            aria-label="Открыть подзадачи"
+          >
+            <ChevronRight size={14} />
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -265,7 +358,7 @@ function KanbanCard({ task, progress, isDone, onEdit, onDrillInto }: {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useSortable({ id: task.id })
   const style: React.CSSProperties = {
     transform: CSS.Translate.toString(transform),
-    opacity: isDragging ? 0.5 : 1,
+    opacity: isDragging ? 0.3 : 1,
   }
 
   // Plays the "settle" pop only on the actual transition into a done
@@ -293,33 +386,7 @@ function KanbanCard({ task, progress, isDone, onEdit, onDrillInto }: {
       className={popping ? 'card card-pop' : 'card'}
       onClick={onEdit}
     >
-      <div style={{ padding: '0.75rem', cursor: 'grab' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', marginBottom: task.dueDate || progress ? '0.5rem' : 0 }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: PRIORITY_COLORS[task.priority], flexShrink: 0, marginTop: 6 }} />
-          <span style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--text-primary)', flex: 1 }}>{task.title}</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-          {task.dueDate && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
-              <CalendarIcon size={11} /> {formatDate(task.dueDate)}
-            </span>
-          )}
-          {progress && progress.total > 0 && (
-            <Badge variant={progress.done === progress.total ? 'success' : 'neutral'}>
-              {progress.done}/{progress.total}
-            </Badge>
-          )}
-          {progress && progress.total > 0 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onDrillInto() }}
-              style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}
-              aria-label="Открыть подзадачи"
-            >
-              <ChevronRight size={14} />
-            </button>
-          )}
-        </div>
-      </div>
+      <KanbanCardContent task={task} progress={progress} onDrillInto={onDrillInto} />
     </div>
   )
 }
