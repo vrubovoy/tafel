@@ -3,7 +3,16 @@
 [![Test](https://github.com/zudaR107/tafel/actions/workflows/test.yml/badge.svg)](https://github.com/zudaR107/tafel/actions/workflows/test.yml)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
-Part of the [Schloss platform](https://github.com/zudaR107/Hof).
+Part of the [Hof platform](https://github.com/zudaR107/Hof) — a suite of
+self-hosted personal services:
+
+- [`schloss`](https://github.com/zudaR107/schloss) — home page / launcher
+- [`schlussel`](https://github.com/zudaR107/schlussel) — auth: accounts, login, tokens
+- [`kuvert`](https://github.com/zudaR107/kuvert) — envelope budgeting
+- **`tafel`** (this repo) — task/project tracking
+- [`tor`](https://github.com/zudaR107/tor) — reverse-proxy gateway
+- [`schloss-ui`](https://github.com/zudaR107/schloss-ui) — shared frontend components
+- [`schloss-server-kit`](https://github.com/zudaR107/schloss-server-kit) — shared backend auth/CORS kit
 
 Tafel ("board" in German) is a personal task/project tracker — projects
 containing tasks, tasks nested under other tasks to any depth, viewed as a
@@ -11,13 +20,6 @@ list, a calendar, or a drag-and-drop kanban board with per-project custom
 statuses.
 
 ## How it fits into the platform
-
-Each service is its own repo, named after a German word related to what it does:
-
-- [`schloss`](https://github.com/zudaR107/schloss) — the home page / launcher
-- [`schlussel`](https://github.com/zudaR107/schlussel) — auth: accounts, login, tokens
-- [`kuvert`](https://github.com/zudaR107/kuvert) — envelope budgeting
-- **`tafel`** (this repo) — task/project tracking
 
 Tafel has no login form of its own. An unauthenticated visitor is redirected to
 Schlüssel's hosted login page and back; the API verifies the resulting token itself
