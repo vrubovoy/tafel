@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tafel</title>
+    <!-- Restores the stored theme before first paint, not just after the
+         JS bundle mounts (main.tsx already applies it eagerly, but that
+         still runs after this document's own default background would
+         otherwise flash first). Same shared "schloss-theme" localStorage
+         key as schloss/schlussel-web/kuvert (see schloss-ui's theme.ts). -->
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem('schloss-theme')
+          if (theme) document.documentElement.setAttribute('data-theme', theme)
+        } catch (e) {}
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

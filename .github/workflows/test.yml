@@ -1,0 +1,65 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # schloss-ui and schloss-server-kit are both git submodules - the
+      # workspace install below touches schloss-ui too (no --filter),
+      # even though the API never imports from it.
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # Pinned exactly - "version: 11" lets the action self-update to
+      # whatever the latest 11.x is at run time, which broke CI on the
+      # sibling repos when pnpm 11.12.0 shipped with a bug in its own
+      # self-installer, unrelated to any change here.
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      # schloss-server-kit is linked via pnpm's workspace:* protocol -
+      # needs building before api can import from it.
+      - run: pnpm --filter @zudar107/schloss-server-kit build
+      - run: pnpm --filter api lint
+      - run: pnpm --filter api test
+
+  web:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # schloss-ui is a git submodule, linked via pnpm's workspace:*
+      # protocol - needs to be checked out and built before web can
+      # import from it.
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @zudar107/schloss-ui build
+      - run: pnpm --filter web lint
+      - run: pnpm --filter web test
