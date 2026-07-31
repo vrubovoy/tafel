@@ -14,8 +14,8 @@ import { Header } from './Header'
 const SIDEBAR_WIDTH_STORAGE_KEY = 'tafel-sidebar-width'
 
 const NAV_ITEMS = [
-  { to: '/kanban',   icon: <Kanban size={18} />,       label: 'Канбан' },
   { to: '/tasks',    icon: <List size={18} />,         label: 'Список' },
+  { to: '/kanban',   icon: <Kanban size={18} />,       label: 'Канбан' },
   { to: '/calendar', icon: <Calendar size={18} />,     label: 'Календарь' },
   { to: '/projects', icon: <FolderKanban size={18} />, label: 'Проекты' },
   { to: '/stats',    icon: <BarChart3 size={18} />,    label: 'Статистика' },
