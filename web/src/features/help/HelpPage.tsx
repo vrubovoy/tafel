@@ -1,0 +1,97 @@
+interface Section {
+  titel: string
+  text: string
+  screenshotSlug: string
+  screenshotAlt: string
+}
+
+const SECTIONS: Section[] = [
+  {
+    titel: 'Проекты',
+    text: 'Проект объединяет связанные задачи и задаёт свой набор колонок канбан-доски (по умолчанию — «К выполнению», «В процессе», «Готово», их можно переименовать, перекрасить и добавить свои).',
+    screenshotSlug: 'projects',
+    screenshotAlt: 'Страница со списком проектов',
+  },
+  {
+    titel: 'Задачи и подзадачи',
+    text: 'У задачи может быть сколько угодно подзадач, а у подзадачи — свои подзадачи: вложенность не ограничена. Задачу нельзя сделать подзадачей её же собственного потомка.',
+    screenshotSlug: 'tasks',
+    screenshotAlt: 'Список задач с раскрытым деревом подзадач',
+  },
+  {
+    titel: 'Канбан-доска',
+    text: 'Колонки — это статусы текущего проекта. Карточка с подзадачами показывает прогресс («3/5») и стрелку — по ней можно «провалиться» внутрь и увидеть подзадачи на отдельной доске с хлебными крошками наверху, чтобы вернуться обратно.',
+    screenshotSlug: 'kanban',
+    screenshotAlt: 'Канбан-доска с карточками задач',
+  },
+  {
+    titel: 'Календарь',
+    text: 'Задачи со сроком выполнения отображаются на своей дате в месячной сетке.',
+    screenshotSlug: 'calendar',
+    screenshotAlt: 'Календарь с задачами по датам',
+  },
+  {
+    titel: 'Повторяющиеся задачи',
+    text: 'При создании задачи можно включить повтор — ежедневно, еженедельно или ежемесячно. Когда текущий экземпляр отмечен выполненным, при следующем открытии списка или статистики автоматически появится новый.',
+    screenshotSlug: 'recurrence',
+    screenshotAlt: 'Форма задачи с настройкой повтора',
+  },
+  {
+    titel: 'Статистика',
+    text: 'Процент выполнения, просроченные задачи, серия дней подряд с выполненными задачами и разбивка по проектам.',
+    screenshotSlug: 'stats',
+    screenshotAlt: 'Страница статистики',
+  },
+]
+
+export function HelpPage() {
+  return (
+    <div style={{ maxWidth: 640, margin: '0 auto' }}>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
+          Как пользоваться Tafel
+        </h1>
+        <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+          Личные проекты и задачи
+        </p>
+      </div>
+
+      <p style={{ margin: '0 0 1.5rem', color: 'var(--text-secondary)', fontSize: '0.875rem', lineHeight: 1.6 }}>
+        Задачи живут внутри проектов и могут быть вложены друг в друга на любую
+        глубину. Одни и те же задачи можно посмотреть тремя способами: списком,
+        календарём по срокам или канбан-доской по статусам.
+      </p>
+
+      <div className="card" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
+        <h2 style={{ margin: '0 0 0.75rem', fontSize: '0.9375rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+          Первые шаги
+        </h2>
+        {/* Tailwind's preflight resets ol/ul to `list-style: none`, so the
+            numbers need to be explicitly restored - otherwise the paddingLeft
+            below just looks like unexplained indentation with no markers. */}
+        <ol style={{ margin: 0, paddingLeft: '1.25rem', listStyleType: 'decimal', color: 'var(--text-muted)', fontSize: '0.8125rem', lineHeight: 1.7 }}>
+          <li>Создайте проект на странице «Проекты».</li>
+          <li>Добавьте задачу и, если нужно, разбейте её на подзадачи.</li>
+          <li>Переключайтесь между списком, календарём и канбан-доской — данные общие.</li>
+        </ol>
+      </div>
+
+      {SECTIONS.map((s) => (
+        <div key={s.titel} className="card" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
+          <h2 style={{ margin: '0 0 0.5rem', fontSize: '0.9375rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+            {s.titel}
+          </h2>
+          <p style={{ margin: '0 0 1rem', color: 'var(--text-muted)', fontSize: '0.8125rem', lineHeight: 1.6 }}>
+            {s.text}
+          </p>
+          {/* TODO(screenshot): drop a PNG at public/guide/tafel-{s.screenshotSlug}.png */}
+          <img
+            src={`/guide/tafel-${s.screenshotSlug}.png`}
+            alt={s.screenshotAlt}
+            style={{ width: '100%', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
