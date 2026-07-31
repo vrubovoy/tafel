@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ListTodo } from 'lucide-react'
 import { Field, DateField, Modal, handleArrowFieldNavigation } from '@zudar107/schloss-ui'
@@ -60,6 +60,18 @@ export function TaskFormModal({ open, onClose, defaultProjectId, defaultParentTa
     enabled: open && !!values.projectId,
   })
 
+  // Set synchronously (a ref, not state) whenever a fresh creation form is
+  // reset below, and cleared once a default status has been assigned -
+  // reading `values.statusId` itself for this instead would see a stale
+  // pre-reset value on every open after the first (this component never
+  // unmounts between opens - Modal just hides its children - so `values`
+  // still holds the previous task's data at the moment this effect and
+  // the one below run, before the reset's setValues has taken effect),
+  // permanently blocking the default-status assignment and, in turn,
+  // silently blocking every subsequent creation's submit (empty statusId
+  // fails handleSubmit's guard with no error shown).
+  const needsDefaultStatus = useRef(false)
+
   useEffect(() => {
     if (!open) return
     if (editing) {
@@ -73,8 +85,10 @@ export function TaskFormModal({ open, onClose, defaultProjectId, defaultParentTa
         recurrenceInterval: editing.recurrenceInterval ?? '',
         recurrenceCount: String(editing.recurrenceCount ?? 1),
       })
+      needsDefaultStatus.current = false
     } else {
       setValues(emptyForm(defaultProjectId ?? projects[0]?.id ?? ''))
+      needsDefaultStatus.current = true
     }
     // Only re-run when the modal actually opens or the target task
     // changes - not on every projects/statuses refetch.
@@ -85,11 +99,13 @@ export function TaskFormModal({ open, onClose, defaultProjectId, defaultParentTa
   // and statuses have loaded, default statusId to the first non-done
   // column so a brand-new task never has to await the user picking one.
   useEffect(() => {
-    if (!open || isEditing || values.statusId || statuses.length === 0) return
+    if (!open || !needsDefaultStatus.current || statuses.length === 0) return
     const first = statuses.find((s) => !s.isDone) ?? statuses[0]
-    if (first) setValues((v) => ({ ...v, statusId: first.id }))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, isEditing, statuses])
+    if (first) {
+      setValues((v) => ({ ...v, statusId: first.id }))
+      needsDefaultStatus.current = false
+    }
+  }, [open, statuses])
 
   const saveMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>

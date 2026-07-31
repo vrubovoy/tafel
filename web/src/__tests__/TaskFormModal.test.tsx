@@ -156,6 +156,46 @@ describe('TaskFormModal when open, creating a new task', () => {
     expect((body as Record<string, unknown>).parentTaskId).toBe('parent-1')
   })
 
+  it('creating a task, closing, then reopening for a second creation still auto-assigns a default status and submits', async () => {
+    // Regression test: this component never unmounts between opens (the
+    // Modal it renders into just hides its children while TaskFormModal
+    // itself stays mounted), so a second creation attempt in the same
+    // session previously left statusId stuck empty - the default-status
+    // effect's guard read a stale, already-assigned statusId from before
+    // the reset had taken effect, so it never re-ran, and handleSubmit's
+    // `!values.statusId` check silently blocked the submit with no error
+    // shown.
+    mockApiWithFixtures()
+    vi.mocked(api.post)
+      .mockResolvedValueOnce({ ...existingTask, id: 't2', title: 'First task' })
+      .mockResolvedValueOnce({ ...existingTask, id: 't3', title: 'Second task' })
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+
+    const { rerender } = render(
+      <TaskFormModal open={true} onClose={onClose} defaultProjectId="proj-1" editing={null} />,
+      { wrapper: createWrapper() },
+    )
+
+    let titleInput = await screen.findByRole('textbox', { name: /назв|title/i })
+    await user.type(titleInput, 'First task')
+    await user.click(screen.getByRole('button', { name: /сохран|созда|save|add/i }))
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalledTimes(1))
+    expect((vi.mocked(api.post).mock.calls[0]![1] as Record<string, unknown>).statusId).toBe('status-1')
+
+    // Simulate the parent closing the modal, then reopening it for a
+    // second creation - same mounted component tree throughout, exactly
+    // like KanbanPage toggling its own formOpen state.
+    rerender(<TaskFormModal open={false} onClose={onClose} defaultProjectId="proj-1" editing={null} />)
+    rerender(<TaskFormModal open={true} onClose={onClose} defaultProjectId="proj-1" editing={null} />)
+
+    titleInput = await screen.findByRole('textbox', { name: /назв|title/i })
+    await user.type(titleInput, 'Second task')
+    await user.click(screen.getByRole('button', { name: /сохран|созда|save|add/i }))
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalledTimes(2))
+    expect((vi.mocked(api.post).mock.calls[1]![1] as Record<string, unknown>).statusId).toBe('status-1')
+  })
+
   it('does not call api.post when the title is empty or whitespace-only', async () => {
     mockApiWithFixtures()
     const user = userEvent.setup()

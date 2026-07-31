@@ -105,7 +105,7 @@ export function ProjectsPage() {
 
       {isLoading ? null : projects.length === 0 ? (
         <EmptyState
-          icon={<HeroIllustration size={ICON_SIZE.illustrative} />}
+          illustration={<HeroIllustration size={100} />}
           title="Проектов пока нет"
           description="Проект объединяет связанные задачи и задаёт свой набор колонок канбан-доски."
           actionLabel="Создать проект"
