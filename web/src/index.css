@@ -110,3 +110,17 @@
     transition: width 400ms ease;
   }
 }
+
+/* A kanban card plays this once, the moment it transitions into a
+ * "done" status (see KanbanCard's isDone-transition ref in
+ * KanbanPage.tsx) - not on every render/refetch. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes card-pop {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.04); }
+    100% { transform: scale(1); }
+  }
+  .card-pop {
+    animation: card-pop 250ms ease;
+  }
+}

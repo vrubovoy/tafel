@@ -5,6 +5,7 @@ import { Plus, FolderKanban, Archive, ArchiveRestore, Kanban } from 'lucide-reac
 import { EmptyState, ICON_SIZE, Button, Field, Modal, Toast, handleArrowFieldNavigation } from '@zudar107/schloss-ui'
 import { api } from '../../lib/api'
 import { useToast } from '../../hooks/useToast'
+import { HeroIllustration } from '../../components/HeroIllustration'
 
 const PROJECT_FORM_ID = 'project-form'
 const PROJECT_NAME_PLACEHOLDER = 'Личный сайт'
@@ -104,7 +105,7 @@ export function ProjectsPage() {
 
       {isLoading ? null : projects.length === 0 ? (
         <EmptyState
-          icon={<FolderKanban size={ICON_SIZE.illustrative} strokeWidth={2} />}
+          icon={<HeroIllustration size={ICON_SIZE.illustrative} />}
           title="Проектов пока нет"
           description="Проект объединяет связанные задачи и задаёт свой набор колонок канбан-доски."
           actionLabel="Создать проект"

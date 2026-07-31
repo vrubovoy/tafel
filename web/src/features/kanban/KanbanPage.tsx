@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearch, useNavigate } from '@tanstack/react-router'
 import {
@@ -223,6 +223,7 @@ function KanbanColumn({ status, tasks, childCounts, onEdit, onDrillInto }: {
               key={task.id}
               task={task}
               progress={childCounts.get(task.id)}
+              isDone={status.isDone}
               onEdit={() => onEdit(task)}
               onDrillInto={() => onDrillInto(task.id)}
             />
@@ -254,9 +255,10 @@ function DroppableColumnBody({ statusId, children }: { statusId: string; childre
   )
 }
 
-function KanbanCard({ task, progress, onEdit, onDrillInto }: {
+function KanbanCard({ task, progress, isDone, onEdit, onDrillInto }: {
   task: Task
   progress?: { total: number; done: number }
+  isDone: boolean
   onEdit: () => void
   onDrillInto: () => void
 }) {
@@ -266,13 +268,29 @@ function KanbanCard({ task, progress, onEdit, onDrillInto }: {
     opacity: isDragging ? 0.5 : 1,
   }
 
+  // Plays the "settle" pop only on the actual transition into a done
+  // status - compared against the previous render via a ref, so a
+  // background refetch that still reports the same done status doesn't
+  // replay it.
+  const wasDone = useRef(isDone)
+  const [popping, setPopping] = useState(false)
+  useEffect(() => {
+    if (isDone && !wasDone.current) {
+      setPopping(true)
+      const t = setTimeout(() => setPopping(false), 250)
+      wasDone.current = isDone
+      return () => clearTimeout(t)
+    }
+    wasDone.current = isDone
+  }, [isDone])
+
   return (
     <div
       ref={setNodeRef}
       style={style}
       {...attributes}
       {...listeners}
-      className="card"
+      className={popping ? 'card card-pop' : 'card'}
       onClick={onEdit}
     >
       <div style={{ padding: '0.75rem', cursor: 'grab' }}>
