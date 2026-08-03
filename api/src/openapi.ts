@@ -129,6 +129,19 @@ registry.registerPath({
   method: 'get', path: '/users/me', tags: ['users'], summary: "Get the current user's profile",
   security: BEARER, responses: { 200: { description: 'OK' } },
 })
+registry.registerPath({
+  method: 'put', path: '/users/me', tags: ['users'], summary: "Update the current user's week-start preference",
+  security: BEARER,
+  request: {
+    body: {
+      content: {
+        // weekStartsOn: 0 = Sunday, 1 = Monday
+        'application/json': { schema: z.object({ weekStartsOn: z.union([z.literal(0), z.literal(1)]) }) },
+      },
+    },
+  },
+  responses: { 200: { description: 'OK' } },
+})
 
 export const openApiDocument = new OpenApiGeneratorV3(registry.definitions).generateDocument({
   openapi: '3.0.0',

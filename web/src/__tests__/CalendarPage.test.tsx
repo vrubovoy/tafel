@@ -63,12 +63,41 @@ function createWrapper() {
   )
 }
 
-function mockApi(opts: { tasks?: Task[] }) {
+function mockApi(opts: { tasks?: Task[]; profile?: Record<string, unknown> | 'pending' }) {
   vi.mocked(api.get).mockImplementation((path: string) => {
     if (path === '/projects') return Promise.resolve(projects)
+    if (path === '/users/me') {
+      if (opts.profile === 'pending') return new Promise(() => {}) // never resolves
+      if (opts.profile) return Promise.resolve(opts.profile)
+      return Promise.resolve([])
+    }
     if (path.startsWith('/tasks')) return Promise.resolve(opts.tasks ?? [])
     return Promise.resolve([])
   })
+}
+
+// Exact Russian weekday-abbreviation labels the header is expected to use,
+// per the spec (Monday-start order). Used to derive DOM order below.
+const mondayFirstLabels = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+const sundayFirstLabels = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
+
+/**
+ * Finds the exact-text weekday-abbreviation elements present in the
+ * document and returns their labels ordered by DOM position (left-to-right
+ * in a row reads as document order for a standard grid/flex header row).
+ */
+function getWeekdayHeaderOrder(): string[] {
+  const allLabels = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+  const found: { label: string; el: Element }[] = []
+  for (const label of allLabels) {
+    for (const el of screen.queryAllByText(label)) {
+      found.push({ label, el })
+    }
+  }
+  found.sort((a, b) =>
+    a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
+  )
+  return found.map((f) => f.label)
 }
 
 beforeEach(() => {
@@ -137,6 +166,72 @@ describe('CalendarPage with a project selected', () => {
       const newestArgs = callsAfter.map(([p]) => String(p))
       const changed = newestArgs.some((arg) => !initialTasksArgs.includes(arg))
       expect(changed).toBe(true)
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// weekStartsOn from GET /users/me
+// ---------------------------------------------------------------------------
+describe('CalendarPage weekday header order based on weekStartsOn', () => {
+  it('starts the header on Monday (Пн..Вс) when weekStartsOn is 1', async () => {
+    mockSearch = { project: 'proj-1' }
+    mockApi({ tasks: [taskDueToday], profile: { id: 'u1', email: 'a@a.com', name: 'A', weekStartsOn: 1 } })
+
+    render(<CalendarPage />, { wrapper: createWrapper() })
+    await screen.findByText('Water the plants')
+
+    await vi.waitFor(() => {
+      expect(getWeekdayHeaderOrder()).toEqual(mondayFirstLabels)
+    })
+  })
+
+  it('starts the header on Sunday (Вс..Сб) when weekStartsOn is 0', async () => {
+    mockSearch = { project: 'proj-1' }
+    mockApi({ tasks: [taskDueToday], profile: { id: 'u1', email: 'a@a.com', name: 'A', weekStartsOn: 0 } })
+
+    render(<CalendarPage />, { wrapper: createWrapper() })
+    await screen.findByText('Water the plants')
+
+    await vi.waitFor(() => {
+      expect(getWeekdayHeaderOrder()).toEqual(sundayFirstLabels)
+    })
+  })
+
+  it('still shows every day of the displayed month when weekStartsOn is 0', async () => {
+    mockSearch = { project: 'proj-1' }
+    mockApi({ tasks: [taskDueToday], profile: { id: 'u1', email: 'a@a.com', name: 'A', weekStartsOn: 0 } })
+
+    render(<CalendarPage />, { wrapper: createWrapper() })
+    await screen.findByText('Water the plants')
+
+    const now = new Date()
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    // Day-of-month "1" and the last day of the month should both be present
+    // regardless of which weekday the grid starts on.
+    expect(screen.queryAllByText(String(1)).length).toBeGreaterThan(0)
+    expect(screen.queryAllByText(String(daysInMonth)).length).toBeGreaterThan(0)
+  })
+
+  it('defaults to Monday-start while the /users/me fetch is still pending', async () => {
+    mockSearch = { project: 'proj-1' }
+    mockApi({ tasks: [taskDueToday], profile: 'pending' })
+
+    render(<CalendarPage />, { wrapper: createWrapper() })
+    await screen.findByText('Water the plants')
+
+    expect(getWeekdayHeaderOrder()).toEqual(mondayFirstLabels)
+  })
+
+  it('defaults to Monday-start when /users/me resolves without a usable weekStartsOn', async () => {
+    mockSearch = { project: 'proj-1' }
+    mockApi({ tasks: [taskDueToday], profile: { id: 'u1', email: 'a@a.com', name: 'A' } })
+
+    render(<CalendarPage />, { wrapper: createWrapper() })
+    await screen.findByText('Water the plants')
+
+    await vi.waitFor(() => {
+      expect(getWeekdayHeaderOrder()).toEqual(mondayFirstLabels)
     })
   })
 })
