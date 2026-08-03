@@ -16,6 +16,10 @@ export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
   email: text('email').notNull(),
   name: text('name').notNull(),
+  // Calendar week-start preference: 0 = Sunday, 1 = Monday (matches
+  // JS Date#getDay()'s own numbering, so the calendar grid can use this
+  // value directly without translating it).
+  weekStartsOn: integer('week_starts_on').notNull().default(1),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 })
 
