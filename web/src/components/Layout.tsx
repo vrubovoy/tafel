@@ -109,8 +109,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <rect x="10" y="6" width="9" height="3" rx="1.5" fill="white" />
               <rect x="5" y="11" width="3" height="3" rx="0.75" fill="white" />
               <rect x="10" y="11" width="9" height="3" rx="1.5" fill="white" />
-              <rect x="5" y="16" width="3" height="3" rx="0.75" fill="#d97706" />
-              <rect x="10" y="16" width="9" height="3" rx="1.5" fill="#d97706" />
+              <rect x="5" y="16" width="3" height="3" rx="0.75" fill="white" />
+              <rect x="10" y="16" width="9" height="3" rx="1.5" fill="white" />
             </svg>
           </div>
           {!collapsed && (
