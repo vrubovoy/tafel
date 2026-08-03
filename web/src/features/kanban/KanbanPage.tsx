@@ -83,21 +83,6 @@ export function KanbanPage() {
   const reorderMutation = useMutation({
     mutationFn: ({ id, statusId, sortOrder }: { id: string; statusId: string; sortOrder: number }) =>
       api.put(`/tasks/${id}/reorder`, { statusId, sortOrder }),
-    onMutate: async ({ id, statusId }) => {
-      await qc.cancelQueries({ queryKey: tasksKey })
-      await qc.cancelQueries({ queryKey: allTasksKey })
-      const previousTasks = qc.getQueryData<Task[]>(tasksKey)
-      const previousAllTasks = qc.getQueryData<Task[]>(allTasksKey)
-      const patch = (list?: Task[]) => list?.map((t) => (t.id === id ? { ...t, statusId } : t))
-      qc.setQueryData<Task[]>(tasksKey, patch(previousTasks))
-      qc.setQueryData<Task[]>(allTasksKey, patch(previousAllTasks))
-      return { previousTasks, previousAllTasks }
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.previousTasks) qc.setQueryData(tasksKey, context.previousTasks)
-      if (context?.previousAllTasks) qc.setQueryData(allTasksKey, context.previousAllTasks)
-      toast.showError('Не удалось переместить задачу')
-    },
     onSettled: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
   })
 
@@ -115,9 +100,11 @@ export function KanbanPage() {
   }
 
   function handleDragEnd(event: DragEndEvent) {
-    setActiveTask(null)
     const { active, over } = event
-    if (!over) return
+    if (!over) {
+      setActiveTask(null)
+      return
+    }
     const taskId = String(active.id)
     const overId = String(over.id)
 
@@ -126,11 +113,36 @@ export function KanbanPage() {
     // the actual target status either way.
     const isColumnId = statuses.some((s) => s.id === overId)
     const targetStatusId = isColumnId ? overId : tasks.find((t) => t.id === overId)?.statusId
-    if (!targetStatusId) return
-
     const task = tasks.find((t) => t.id === taskId)
-    if (!task || task.statusId === targetStatusId) return
-    reorderMutation.mutate({ id: taskId, statusId: targetStatusId, sortOrder: 0 })
+
+    if (!targetStatusId || !task || task.statusId === targetStatusId) {
+      setActiveTask(null)
+      return
+    }
+
+    // Patches the cache and clears the drag overlay in the same
+    // synchronous call, so both commit in one React render. Doing the
+    // patch inside the mutation's own onMutate instead (as this used to)
+    // defers it to a later microtask - the overlay would disappear one
+    // render before the card actually moved columns, showing the card
+    // snap back to its old spot for a frame before popping into the new
+    // column: a visible duplicate/flash.
+    void qc.cancelQueries({ queryKey: tasksKey })
+    void qc.cancelQueries({ queryKey: allTasksKey })
+    const previousTasks = qc.getQueryData<Task[]>(tasksKey)
+    const previousAllTasks = qc.getQueryData<Task[]>(allTasksKey)
+    const patch = (list?: Task[]) => list?.map((t) => (t.id === taskId ? { ...t, statusId: targetStatusId } : t))
+    qc.setQueryData<Task[]>(tasksKey, patch(previousTasks))
+    qc.setQueryData<Task[]>(allTasksKey, patch(previousAllTasks))
+    setActiveTask(null)
+
+    reorderMutation.mutate({ id: taskId, statusId: targetStatusId, sortOrder: 0 }, {
+      onError: () => {
+        qc.setQueryData(tasksKey, previousTasks)
+        qc.setQueryData(allTasksKey, previousAllTasks)
+        toast.showError('Не удалось переместить задачу')
+      },
+    })
   }
 
   function openCreate() {
@@ -230,7 +242,16 @@ export function KanbanPage() {
             />
           ))}
         </div>
-        <DragOverlay>
+        {/* No drop animation: dnd-kit's default one measures the sortable
+            item's *current* DOM rect to fly the overlay toward, but that
+            item only knows about positions within its own column - on a
+            cross-column drop it's still sitting in the origin column at
+            that instant, so the overlay would fly back there and fade
+            out while the real card (already patched into its new column,
+            see handleDragEnd) is visible at the same time: a duplicate/
+            flash. Dropping instantly instead reads as a clean, immediate
+            placement. */}
+        <DragOverlay dropAnimation={null}>
           {activeTask && (
             <div className="card" style={{ width: 280, boxShadow: 'var(--shadow-lg)' }}>
               <KanbanCardContent task={activeTask} progress={childCounts.get(activeTask.id)} dragging />
