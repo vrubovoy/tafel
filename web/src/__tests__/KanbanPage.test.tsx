@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { KanbanPage } from '../features/kanban/KanbanPage'
 import type { Task, Status } from '../lib/types'
@@ -156,5 +157,27 @@ describe('KanbanPage with a project and parent task selected', () => {
       screen.queryAllByRole('link').some((el) => /kanban/i.test(el.getAttribute('href') ?? '') && !/task-1/.test(el.getAttribute('href') ?? '')) ||
       screen.queryAllByRole('button', { name: /назад|back|вверх|up/i }).length > 0
     expect(hasBackUp).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Manage-statuses ("gear") button
+// ---------------------------------------------------------------------------
+describe('KanbanPage manage-statuses button', () => {
+  it('opens the manage-statuses UI when clicking the "Настроить колонки" button', async () => {
+    mockSearch = { project: 'proj-1' }
+    mockApi({ tasks: topLevelTasks })
+    const user = userEvent.setup()
+
+    render(<KanbanPage />, { wrapper: createWrapper() })
+
+    await screen.findByText('To do')
+
+    const manageButton = screen.getByRole('button', { name: /настроить.*колон/i })
+    await user.click(manageButton)
+
+    // The modal should now show each status name as an editable input's value.
+    expect(await screen.findByDisplayValue('To do')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Done')).toBeInTheDocument()
   })
 })

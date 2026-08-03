@@ -7,7 +7,7 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Plus, Kanban as KanbanIcon, ChevronRight, ChevronUp, Calendar as CalendarIcon } from 'lucide-react'
+import { Plus, Kanban as KanbanIcon, ChevronRight, ChevronUp, Calendar as CalendarIcon, Settings } from 'lucide-react'
 import { EmptyState, ICON_SIZE, Button, Badge } from '@zudar107/schloss-ui'
 import { api } from '../../lib/api'
 import { useToast } from '../../hooks/useToast'
@@ -16,6 +16,7 @@ import type { Project } from '../projects/ProjectsPage'
 import type { Status, Task } from '../../lib/types'
 import { PRIORITY_COLORS } from '../../lib/types'
 import { TaskFormModal } from '../tasks/TaskFormModal'
+import { ManageStatusesModal } from './ManageStatusesModal'
 
 export function KanbanPage() {
   const search = useSearch({ strict: false }) as { project?: string; parent?: string }
@@ -28,6 +29,7 @@ export function KanbanPage() {
 
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Task | null>(null)
+  const [statusesModalOpen, setStatusesModalOpen] = useState(false)
 
   const { data: projects = [] } = useQuery<Project[]>({
     queryKey: ['projects'],
@@ -67,6 +69,16 @@ export function KanbanPage() {
     }
     return counts
   }, [allProjectTasks, statuses])
+
+  // Whole-project (not parent-scoped) task count per status - matches
+  // what the DELETE /statuses/:id endpoint itself checks, so the
+  // "delete this column" flow knows up front whether it needs to ask
+  // where to move that column's tasks first.
+  const taskCountByStatus = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const t of allProjectTasks) counts.set(t.statusId, (counts.get(t.statusId) ?? 0) + 1)
+    return counts
+  }, [allProjectTasks])
 
   const currentProject = projects.find((p) => p.id === projectId)
   const parentTask = parentTaskId ? allProjectTasks.find((t) => t.id === parentTaskId) : null
@@ -217,6 +229,9 @@ export function KanbanPage() {
               <ChevronUp size={15} /> Наверх
             </Button>
           )}
+          <Button variant="ghost" style={{ padding: '0.4rem' }} onClick={() => setStatusesModalOpen(true)} aria-label="Настроить колонки">
+            <Settings size={15} />
+          </Button>
           <Button variant="primary" style={{ fontSize: '0.8125rem', padding: '0.4rem 0.875rem' }} onClick={openCreate}>
             <Plus size={15} /> {parentTask ? 'Новая подзадача' : 'Новая задача'}
           </Button>
@@ -266,6 +281,14 @@ export function KanbanPage() {
         defaultProjectId={projectId}
         defaultParentTaskId={parentTaskId}
         editing={editing}
+      />
+
+      <ManageStatusesModal
+        open={statusesModalOpen}
+        onClose={() => setStatusesModalOpen(false)}
+        projectId={projectId}
+        statuses={statuses}
+        taskCountByStatus={taskCountByStatus}
       />
     </div>
   )
