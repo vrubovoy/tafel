@@ -10,9 +10,10 @@ import 'swagger-ui-dist/swagger-ui.css'
 // Bearer header - useAuth() already holds one, threaded through to both
 // the initial spec fetch and every "Try it out" call.
 //
-// kuvert/web has no client-side source of the current user's role outside
-// React state (unlike schlussel/web, which has it from its own /me call
-// too, but here useAuth() is the one place it already lives) - checked
+// kuvert/frontend has no client-side source of the current user's role
+// outside React state (unlike schlussel/frontend, which has it from its
+// own /me call too, but here useAuth() is the one place it already
+// lives) - checked
 // here in the component body rather than the route's beforeLoad, which
 // runs before that state is available.
 export function DocsPage() {

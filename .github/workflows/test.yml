@@ -6,14 +6,14 @@ on:
   pull_request:
 
 jobs:
-  api:
+  backend:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       # schloss-ui and schloss-server-kit are both git submodules - the
       # workspace install below touches schloss-ui too (no --filter),
-      # even though the API never imports from it.
+      # even though the backend never imports from it.
       - uses: actions/checkout@v7
         with:
           submodules: recursive
@@ -33,18 +33,18 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       # schloss-server-kit is linked via pnpm's workspace:* protocol -
-      # needs building before api can import from it.
+      # needs building before backend can import from it.
       - run: pnpm --filter @zudar107/schloss-server-kit build
-      - run: pnpm --filter api lint
-      - run: pnpm --filter api test
+      - run: pnpm --filter backend lint
+      - run: pnpm --filter backend test
 
-  web:
+  frontend:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       # schloss-ui is a git submodule, linked via pnpm's workspace:*
-      # protocol - needs to be checked out and built before web can
+      # protocol - needs to be checked out and built before frontend can
       # import from it.
       - uses: actions/checkout@v7
         with:
@@ -61,5 +61,5 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @zudar107/schloss-ui build
-      - run: pnpm --filter web lint
-      - run: pnpm --filter web test
+      - run: pnpm --filter frontend lint
+      - run: pnpm --filter frontend test

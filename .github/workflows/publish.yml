@@ -13,10 +13,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - image: tafel-api
-            dockerfile: api/Dockerfile
-          - image: tafel-web
-            dockerfile: web/Dockerfile
+          - image: tafel-backend
+            dockerfile: backend/Dockerfile
+          - image: tafel-frontend
+            dockerfile: frontend/Dockerfile
     steps:
       # schloss-ui and schloss-server-kit are both git submodules - need
       # to be checked out so they're present in the build context these

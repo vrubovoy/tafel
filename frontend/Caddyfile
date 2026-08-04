@@ -8,11 +8,12 @@
 		file_server
 	}
 
-	# handle_path strips the matched /api prefix before proxying, same as
-	# nginx's proxy_pass http://tafel-api:3002/ (trailing slash rewrite) -
-	# tafel-api's own routes are mounted at root, not under /api.
-	handle_path /api/* {
-		reverse_proxy tafel-api:3002
+	# handle_path strips the matched /backend prefix before proxying, same
+	# as nginx's proxy_pass http://tafel-backend:3002/ (trailing slash
+	# rewrite) - tafel-backend's own routes are mounted at root, not under
+	# /backend.
+	handle_path /backend/* {
+		reverse_proxy tafel-backend:3002
 	}
 
 	handle /auth/* {

@@ -7,7 +7,7 @@ import { buildSchluesselLoginUrl } from './authRedirect'
 export { ApiError }
 
 export const apiClient = createApiClient({
-  base: '/api',
+  base: '/backend',
   // A background request's own refresh-and-retry both failed - the
   // session is genuinely gone, so send the browser to schlussel's
   // hosted login (PKCE) rather than a local /login route this app
