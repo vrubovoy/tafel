@@ -22,7 +22,7 @@ jobs:
       # whatever the latest 11.x is at run time, which broke CI on the
       # sibling repos when pnpm 11.12.0 shipped with a bug in its own
       # self-installer, unrelated to any change here.
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v6.0.9
         with:
           version: 11.7.0
 
@@ -50,7 +50,7 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v6.0.9
         with:
           version: 11.7.0
 
