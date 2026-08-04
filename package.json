@@ -1,15 +1,15 @@
 {
   "name": "tafel",
   "version": "0.1.0",
-  "description": "Tafel — personal task/project tracker for the Schloss platform",
+  "description": "Tafel — personal task/project tracker for the Hof platform",
   "private": true,
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
-    "dev:api": "pnpm --filter api dev",
-    "dev:web": "pnpm --filter web dev",
-    "build": "pnpm --filter api build && pnpm --filter web build",
-    "db:generate": "pnpm --filter api db:generate",
-    "db:migrate": "pnpm --filter api db:migrate"
+    "dev:backend": "pnpm --filter backend dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "build": "pnpm --filter backend build && pnpm --filter frontend build",
+    "db:generate": "pnpm --filter backend db:generate",
+    "db:migrate": "pnpm --filter backend db:migrate"
   }
 }

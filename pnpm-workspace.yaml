@@ -1,6 +1,6 @@
 packages:
-  - "api"
-  - "web"
+  - "backend"
+  - "frontend"
   - "schloss-ui"
   - "schloss-server-kit"
 

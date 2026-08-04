@@ -2,7 +2,7 @@
 #   docker network create schloss-net
 #   git submodule update --init
 # schlussel runs from its own repo (see schlussel/docker-compose.yml) and
-# must be on the same network for tafel-api to reach it by hostname.
+# must be on the same network for tafel-backend to reach it by hostname.
 #
 # Neither service publishes a host port - both are reached through the
 # tor gateway (see https://github.com/zudaR107/tor), which is the only
@@ -10,10 +10,10 @@
 # name so it's the same physical volume whether this compose file is run
 # standalone or included from tor's.
 services:
-  tafel-api:
+  tafel-backend:
     build:
       context: .
-      dockerfile: api/Dockerfile
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     environment:
       PORT: 3002
@@ -39,10 +39,10 @@ services:
       timeout: 5s
       retries: 3
 
-  tafel-web:
+  tafel-frontend:
     build:
       context: .
-      dockerfile: web/Dockerfile
+      dockerfile: frontend/Dockerfile
       args:
         VITE_SCHLUSSEL_URL: ${SCHLUSSEL_WEB_URL:-https://auth.localhost}
         VITE_SCHLOSS_URL: ${SCHLOSS_URL:-https://localhost}
@@ -50,7 +50,7 @@ services:
     networks:
       - schloss-net
     depends_on:
-      - tafel-api
+      - tafel-backend
 
 volumes:
   tafel-data:
