@@ -18,10 +18,13 @@ export function HeroIllustration({ size = 32, className }: { size?: number; clas
       {/* Board frame */}
       <rect x="6" y="6" width="128" height="98" rx="6" fill="#d97706" />
 
-      {/* Cards - two in progress, one in the pale "done" recess tone */}
+      {/* Cards - two in progress, one in the pale "done" recess tone.
+          The done card plays a brief "settle" pop on mount (see
+          index.css's hero-card-settle), echoing the same pop a real
+          kanban card plays when it's dragged into a done column. */}
       <rect x="18" y="20" width="32" height="42" rx="3" fill="#f59e0b" />
       <rect x="58" y="20" width="32" height="26" rx="3" fill="#f59e0b" />
-      <rect x="98" y="20" width="24" height="58" rx="3" fill="#fef3c7" />
+      <rect className="hero-done-card" x="98" y="20" width="24" height="58" rx="3" fill="#fef3c7" />
 
       {/* Signature dot - schloss's own violet, a small cross-service
           wink tying the illustration family together. */}

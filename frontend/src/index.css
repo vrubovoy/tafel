@@ -124,3 +124,18 @@
     animation: card-pop 250ms ease;
   }
 }
+
+/* HeroIllustration's "done" card plays a brief settle-in pop on mount -
+ * the mascot's own small flourish, in the same spirit as kuvert's
+ * envelope flap and echoing the real card-pop above. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes hero-card-settle {
+    0%   { transform: scale(0.6); opacity: 0.4; }
+    60%  { transform: scale(1.06); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .hero-done-card {
+    transform-origin: 110px 49px;
+    animation: hero-card-settle 500ms ease;
+  }
+}

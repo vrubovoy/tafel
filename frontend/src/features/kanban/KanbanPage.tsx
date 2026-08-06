@@ -7,8 +7,8 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Plus, Kanban as KanbanIcon, ChevronRight, ChevronUp, Calendar as CalendarIcon, Settings } from 'lucide-react'
-import { EmptyState, ICON_SIZE, Button, Badge } from '@zudar107/schloss-ui'
+import { Plus, ChevronRight, ChevronUp, Calendar as CalendarIcon, Settings } from 'lucide-react'
+import { EmptyState, Button, Badge } from '@zudar107/schloss-ui'
 import { api } from '../../lib/api'
 import { useToast } from '../../hooks/useToast'
 import { formatDate } from '../../lib/format'
@@ -17,6 +17,7 @@ import type { Status, Task } from '../../lib/types'
 import { PRIORITY_COLORS } from '../../lib/types'
 import { TaskFormModal } from '../tasks/TaskFormModal'
 import { ManageStatusesModal } from './ManageStatusesModal'
+import { HeroIllustration } from '../../components/HeroIllustration'
 
 export function KanbanPage() {
   const search = useSearch({ strict: false }) as { project?: string; parent?: string }
@@ -181,7 +182,7 @@ export function KanbanPage() {
         <h1 style={{ margin: '0 0 1rem', fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>Канбан</h1>
         {projects.length === 0 ? (
           <EmptyState
-            icon={<KanbanIcon size={ICON_SIZE.illustrative} strokeWidth={2} />}
+            illustration={<HeroIllustration size={100} />}
             title="Сначала создайте проект"
             description="У доски нет колонок без проекта — статусы задаются на уровне проекта."
             actionLabel="Перейти к проектам"
