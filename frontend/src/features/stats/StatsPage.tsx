@@ -24,21 +24,24 @@ export function StatsPage() {
 
   if (data.totalTasks === 0) {
     return (
-      <div style={{ maxWidth: 860, margin: '0 auto', textAlign: 'center', padding: '4rem 2rem' }}>
-        <div style={{
-          width: 52, height: 52, borderRadius: 14,
-          background: 'var(--bg-base)', color: 'var(--text-muted)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          margin: '0 auto 1rem',
-        }}>
-          <BarChart3 size={ICON_SIZE.illustrative} strokeWidth={2} />
+      <div style={{ maxWidth: 860, margin: '0 auto' }}>
+        <h1 style={{ margin: '0 0 1.5rem', fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>Статистика</h1>
+        <div style={{ textAlign: 'center', padding: '4rem 2rem' }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: 14,
+            background: 'var(--accent-muted)', color: 'var(--accent)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            margin: '0 auto 1rem',
+          }}>
+            <BarChart3 size={ICON_SIZE.illustrative} strokeWidth={2} />
+          </div>
+          <h2 style={{ margin: '0 0 0.5rem', color: 'var(--text-primary)', fontSize: '1.125rem', fontWeight: 600 }}>
+            Пока нет данных для статистики
+          </h2>
+          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+            Статистика появится, как только вы создадите первые задачи.
+          </p>
         </div>
-        <h2 style={{ margin: '0 0 0.5rem', color: 'var(--text-primary)', fontSize: '1.125rem', fontWeight: 600 }}>
-          Пока нет данных для статистики
-        </h2>
-        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-          Статистика появится, как только вы создадите первые задачи.
-        </p>
       </div>
     )
   }
