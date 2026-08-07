@@ -62,6 +62,13 @@ This repo is a pnpm workspace with two packages:
   caller's Tafel data (including archived records).
 - **API documentation** — an admin-only OpenAPI spec (`GET /openapi.json`) and a Swagger
   UI viewer at `/docs` in the frontend app, generated from the backend's own Zod schemas.
+- **Due-date notifications** — a background scanner emits one `tafel.task.due.v1`
+  event per task the moment it becomes due, and again once when it becomes
+  overdue, computed in the task owner's own timezone (mirrored locally from the
+  Schlüssel token on each request, UTC if never seen). Events are queued in a
+  transactional outbox and delivered to [`glocke`](https://github.com/zudaR107/glocke),
+  the platform's notification service; there is no new HTTP endpoint on Tafel's
+  own API for this — it is outbound-only.
 
 ## Behavioral contracts
 
@@ -114,7 +121,11 @@ projects are listed with `GET /projects?archived=true`.
 platform-wide value, then Monday. `PUT /users/me` accepts `0` (Sunday), `1`
 (Monday), or `null` (clear the local override). `dateFormat` and `timezone` are
 read-only in Tafel and come from the current Schlüssel token; update them in
-Schlüssel and refresh the session token.
+Schlüssel and refresh the session token. `timezone` is additionally mirrored
+into the local user row on every request (coalesced, never cleared by a token
+that lacks the claim) so the due-date notification scanner — which runs on a
+timer, with no request or token in scope — can still evaluate "due today" per
+task owner rather than in server-local time.
 
 The completion trend and current streak bucket timestamps by that profile
 timezone, falling back to UTC. The 14-day trend includes today and is ordered
@@ -191,6 +202,10 @@ pnpm --filter frontend lint
 | `TAFEL_ALLOWED_ORIGINS` | Comma-separated CORS allowlist; Compose maps it to the backend's `ALLOWED_ORIGINS` |
 | `SCHLUSSEL_WEB_URL` | Where sign-in redirects; Compose passes it as the frontend build's `VITE_SCHLUSSEL_URL` |
 | `SCHLOSS_URL` | Where the header's "На главную" link points; Compose passes it as `VITE_SCHLOSS_URL` |
+| `GLOCKE_BASE_URL` | Where the notification outbox delivers events; unset in Compose defaults to `http://glocke-backend:3004` |
+| `TAFEL_TO_GLOCKE_HMAC_KEY_ID` | Key id Tafel signs outbound Glocke requests with |
+| `TAFEL_TO_GLOCKE_HMAC_SECRET` | Must match Glocke's own `GLOCKE_SOURCE_SECRET_TAFEL` exactly; left unset, due-date events still get recorded but queue up undelivered rather than crashing the service |
+| `TAFEL_DUE_SCAN_INTERVAL_MS` | How often the due-date scanner runs (default one hour); it also runs once immediately at boot |
 
 Normal and delegated export tokens use the same `SCHLUSSEL_JWKS_URL` and
 `JWT_ISSUER`; the Tafel delegation audience is fixed by the service as
