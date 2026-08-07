@@ -31,11 +31,21 @@ export function ProjectsPage() {
   const toast = useToast()
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Project | null>(null)
+  const [view, setView] = useState<'active' | 'archived'>('active')
 
   const { data: projects = [], isLoading } = useQuery<Project[]>({
     queryKey: ['projects'],
     queryFn: () => api.get('/projects'),
   })
+
+  const { data: archivedProjects = [], isLoading: archivedLoading } = useQuery<Project[]>({
+    queryKey: ['projects', 'archived'],
+    queryFn: () => api.get('/projects?archived=true'),
+    enabled: view === 'archived',
+  })
+
+  const visibleProjects = view === 'active' ? projects : archivedProjects
+  const visibleLoading = view === 'active' ? isLoading : archivedLoading
 
   const createMutation = useMutation({
     mutationFn: (values: ProjectFormValues) => api.post('/projects', values),
@@ -66,6 +76,15 @@ export function ProjectsPage() {
     onError: () => toast.showError('Не удалось архивировать проект'),
   })
 
+  const restoreMutation = useMutation({
+    mutationFn: (id: string) => api.post(`/projects/${id}/restore`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['projects'] })
+      toast.showSuccess('Проект восстановлен')
+    },
+    onError: () => toast.showError('Не удалось восстановить проект'),
+  })
+
   function openCreate() {
     setEditing(null)
     setModalOpen(true)
@@ -94,7 +113,7 @@ export function ProjectsPage() {
             Проекты
           </h1>
           <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
-            {projects.length} {projects.length === 1 ? 'проект' : 'проектов'}
+            {visibleProjects.length} {visibleProjects.length === 1 ? 'проект' : 'проектов'}
           </p>
         </div>
         <Button variant="primary" style={{ fontSize: '0.8125rem', padding: '0.4rem 0.875rem' }} onClick={openCreate}>
@@ -102,19 +121,36 @@ export function ProjectsPage() {
         </Button>
       </div>
 
-      {isLoading ? null : projects.length === 0 ? (
+      <div style={{ display: 'flex', gap: '0.375rem', marginBottom: '1rem' }}>
+        <Button variant={view === 'active' ? 'secondary' : 'ghost'} onClick={() => setView('active')}>
+          Активные
+        </Button>
+        <Button variant={view === 'archived' ? 'secondary' : 'ghost'} onClick={() => setView('archived')}>
+          Архивные
+        </Button>
+      </div>
+
+      {visibleLoading ? null : visibleProjects.length === 0 ? (
         <EmptyState
           icon={<FolderKanban size={ICON_SIZE.illustrative} strokeWidth={2} />}
-          title="Проектов пока нет"
-          description="Проект объединяет связанные задачи и задаёт свой набор колонок канбан-доски."
-          actionLabel="Создать проект"
-          actionIcon={<Plus size={16} />}
-          onAction={openCreate}
+          title={view === 'active' ? 'Проектов пока нет' : 'Архив пуст'}
+          description={view === 'active'
+            ? 'Проект объединяет связанные задачи и задаёт свой набор колонок канбан-доски.'
+            : 'Архивированные проекты появятся здесь.'}
+          actionLabel={view === 'active' ? 'Создать проект' : 'К активным проектам'}
+          actionIcon={view === 'active' ? <Plus size={16} /> : <ArchiveRestore size={16} />}
+          onAction={view === 'active' ? openCreate : () => setView('active')}
         />
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '1rem' }}>
-          {projects.map((p) => (
-            <ProjectCard key={p.id} project={p} onEdit={() => openEdit(p)} onArchive={() => archiveMutation.mutate(p.id)} />
+          {visibleProjects.map((p) => (
+            <ProjectCard
+              key={p.id}
+              project={p}
+              onEdit={() => openEdit(p)}
+              onArchive={() => archiveMutation.mutate(p.id)}
+              onRestore={() => restoreMutation.mutate(p.id)}
+            />
           ))}
         </div>
       )}
@@ -144,10 +180,11 @@ export function ProjectsPage() {
   )
 }
 
-function ProjectCard({ project, onEdit, onArchive }: {
+function ProjectCard({ project, onEdit, onArchive, onRestore }: {
   project: Project
   onEdit: () => void
   onArchive: () => void
+  onRestore: () => void
 }) {
   return (
     <div className="card" style={{ padding: '1.25rem', position: 'relative', overflow: 'hidden' }}>
@@ -165,12 +202,17 @@ function ProjectCard({ project, onEdit, onArchive }: {
           </div>
           <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)' }}>{project.name}</div>
         </div>
-        <Button variant="ghost" style={{ padding: '0.3rem', border: 'none' }} onClick={onArchive} aria-label="Архивировать проект">
+        <Button
+          variant="ghost"
+          style={{ padding: '0.3rem', border: 'none' }}
+          onClick={project.archived ? onRestore : onArchive}
+          aria-label={project.archived ? 'Восстановить проект' : 'Архивировать проект'}
+        >
           {project.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}
         </Button>
       </div>
 
-      <div style={{ display: 'flex', gap: '0.5rem' }}>
+      {!project.archived && <div style={{ display: 'flex', gap: '0.5rem' }}>
         <Link
           to="/kanban"
           search={{ project: project.id }}
@@ -182,7 +224,7 @@ function ProjectCard({ project, onEdit, onArchive }: {
         <Button variant="ghost" style={{ fontSize: '0.8125rem', border: 'none' }} onClick={onEdit}>
           Изменить
         </Button>
-      </div>
+      </div>}
     </div>
   )
 }

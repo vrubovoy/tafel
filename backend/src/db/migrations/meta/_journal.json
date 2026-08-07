@@ -15,6 +15,27 @@
       "when": 1785743059740,
       "tag": "0001_colorful_mandroid",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786015671467,
+      "tag": "0002_yummy_thunderbolts",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1786026146875,
+      "tag": "0003_big_victor_mancha",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786081667088,
+      "tag": "0004_organic_miek",
+      "breakpoints": true
     }
   ]
 }

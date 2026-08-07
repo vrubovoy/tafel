@@ -168,6 +168,38 @@ describe('CalendarPage with a project selected', () => {
       expect(changed).toBe(true)
     })
   })
+
+  it('keeps a date-only value on the same calendar day in the long modal label', async () => {
+    const originalTimezone = process.env.TZ
+    process.env.TZ = 'America/Los_Angeles'
+
+    try {
+      mockSearch = { project: 'proj-1' }
+      const now = new Date()
+      const dueDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-15`
+      const tasks = Array.from({ length: 4 }, (_, index): Task => ({
+        ...taskDueToday,
+        id: `long-label-${index}`,
+        title: `Task ${index + 1}`,
+        dueDate,
+      }))
+      mockApi({ tasks })
+      const user = userEvent.setup()
+
+      render(<CalendarPage />, { wrapper: createWrapper() })
+      await user.click(await screen.findByRole('button', { name: '+1 ещё' }))
+
+      const expected = new Date(now.getFullYear(), now.getMonth(), 15).toLocaleDateString('ru-RU', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
+      expect(screen.getByText(expected)).toBeInTheDocument()
+    } finally {
+      if (originalTimezone === undefined) delete process.env.TZ
+      else process.env.TZ = originalTimezone
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------

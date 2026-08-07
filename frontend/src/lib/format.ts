@@ -1,5 +1,8 @@
-export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+export function formatDateOnly(
+  iso: string,
+  options?: Intl.DateTimeFormatOptions,
+): string {
+  return new Date(iso).toLocaleDateString('ru-RU', { ...options, timeZone: 'UTC' })
 }
 
 export function today(): string {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 vi.mock('../db/index.js', async () => await import('./helpers/db.js'))
 vi.mock('../middleware/auth.js', async () => await import('./helpers/auth-mock.js'))
@@ -19,6 +19,7 @@ const put = (path: string, body: unknown, headers = JSON_H1) =>
 const del = (path: string, headers = H1) => app.request(path, { method: 'DELETE', headers })
 
 beforeEach(() => cleanDb())
+afterEach(() => vi.useRealTimers())
 
 function addDays(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split('-').map(Number)
@@ -51,7 +52,8 @@ describe('GET /tasks', () => {
     for (const key of [
       'id', 'userId', 'projectId', 'parentTaskId', 'statusId', 'title', 'description',
       'priority', 'dueDate', 'sortOrder', 'completedAt', 'recurrenceInterval',
-      'recurrenceCount', 'recurrenceAnchorDate', 'archived', 'createdAt',
+      'recurrenceCount', 'recurrenceAnchorDate', 'recurrenceSeriesId',
+      'archived', 'archivedByProject', 'createdAt',
     ]) {
       expect(t).toHaveProperty(key)
     }
@@ -345,6 +347,84 @@ describe('cycle prevention and cross-project parent (see also isolation.test.ts)
     const unchanged = (await (await get(`/tasks?parentTaskId=`)).json()) as any[]
     expect(unchanged.find((t) => t.id === grandparent.id)).toBeDefined()
   })
+
+  it('never leaves a task with a status or parent from its old project after a cross-project move', async () => {
+    const { project: p1, todoStatus: s1 } = await createProjectWithStatuses('P1')
+    const { project: p2 } = await createProjectWithStatuses('P2')
+    const parent = (await (
+      await post('/tasks', { projectId: p1.id, statusId: s1.id, title: 'Parent' })
+    ).json()) as any
+    const child = (await (
+      await post('/tasks', {
+        projectId: p1.id, statusId: s1.id, title: 'Child', parentTaskId: parent.id,
+      })
+    ).json()) as any
+
+    const moveResponse = await put(`/tasks/${child.id}`, { projectId: p2.id })
+    expect(moveResponse.status).toBeLessThan(500)
+
+    const tasks = (await (await get('/tasks')).json()) as any[]
+    const updated = tasks.find((task) => task.id === child.id)!
+    if (updated.projectId === p2.id) {
+      const p2Statuses = (await (await get(`/statuses?projectId=${p2.id}`)).json()) as any[]
+      expect(p2Statuses.map((status) => status.id)).toContain(updated.statusId)
+      if (updated.parentTaskId !== null) {
+        expect(tasks.find((task) => task.id === updated.parentTaskId)?.projectId).toBe(p2.id)
+      }
+    } else {
+      expect(updated).toMatchObject({ projectId: p1.id, statusId: s1.id, parentTaskId: parent.id })
+    }
+  })
+
+  it('rejects moving a task into an archived project without changing the task', async () => {
+    const { project: source, todoStatus } = await createProjectWithStatuses('Source')
+    const { project: destination } = await createProjectWithStatuses('Archived destination')
+    const task = (await (
+      await post('/tasks', { projectId: source.id, statusId: todoStatus.id, title: 'Stay put' })
+    ).json()) as any
+    await del(`/projects/${destination.id}`)
+
+    const moveResponse = await put(`/tasks/${task.id}`, { projectId: destination.id })
+
+    expect(moveResponse.status).toBe(409)
+    const tasks = (await (await get(`/tasks?projectId=${source.id}`)).json()) as any[]
+    expect(tasks.find((candidate) => candidate.id === task.id)).toMatchObject({
+      projectId: source.id,
+      statusId: todoStatus.id,
+    })
+  })
+
+  it('rejects moving a task out of an archived project or clears its project-archive flags', async () => {
+    const { project: source, todoStatus } = await createProjectWithStatuses('Archived source')
+    const { project: destination } = await createProjectWithStatuses('Active destination')
+    const task = (await (
+      await post('/tasks', { projectId: source.id, statusId: todoStatus.id, title: 'Move safely' })
+    ).json()) as any
+    await del(`/projects/${source.id}`)
+
+    const moveResponse = await put(`/tasks/${task.id}`, { projectId: destination.id })
+
+    expect(moveResponse.status).toBeLessThan(500)
+    if (moveResponse.ok) {
+      expect(await moveResponse.json()).toMatchObject({
+        projectId: destination.id,
+        archived: false,
+        archivedByProject: false,
+      })
+      const destinationTasks = (await (await get(`/tasks?projectId=${destination.id}`)).json()) as any[]
+      expect(destinationTasks.find((candidate) => candidate.id === task.id)).toMatchObject({
+        archived: false,
+        archivedByProject: false,
+      })
+    } else {
+      expect(moveResponse.status).toBeGreaterThanOrEqual(400)
+      await app.request(`/projects/${source.id}/restore`, { method: 'POST', headers: H1 })
+      const sourceTasks = (await (await get(`/tasks?projectId=${source.id}`)).json()) as any[]
+      expect(sourceTasks.find((candidate) => candidate.id === task.id)).toMatchObject({
+        projectId: source.id,
+      })
+    }
+  })
 })
 
 describe('DELETE /tasks/:id', () => {
@@ -378,6 +458,41 @@ describe('DELETE /tasks/:id', () => {
   it('returns 404 for an unknown id', async () => {
     const res = await del('/tasks/nonexistent')
     expect(res.status).toBe(404)
+  })
+})
+
+describe('POST /tasks/:id/restore', () => {
+  it('does not expose a restored nested task beneath archived ancestors', async () => {
+    const { project, todoStatus } = await createProjectWithStatuses()
+    const parent = (await (
+      await post('/tasks', { projectId: project.id, statusId: todoStatus.id, title: 'Parent' })
+    ).json()) as any
+    const child = (await (
+      await post('/tasks', {
+        projectId: project.id,
+        statusId: todoStatus.id,
+        title: 'Child',
+        parentTaskId: parent.id,
+      })
+    ).json()) as any
+    const grandchild = (await (
+      await post('/tasks', {
+        projectId: project.id,
+        statusId: todoStatus.id,
+        title: 'Grandchild',
+        parentTaskId: child.id,
+      })
+    ).json()) as any
+    await del(`/tasks/${parent.id}`)
+
+    const restoreResponse = await app.request(`/tasks/${grandchild.id}/restore`, {
+      method: 'POST',
+      headers: H1,
+    })
+    expect(restoreResponse.status).toBe(409)
+
+    const visible = (await (await get(`/tasks?projectId=${project.id}`)).json()) as any[]
+    expect(visible).toEqual([])
   })
 })
 
@@ -464,7 +579,9 @@ describe('recurring task regeneration (lazy, via GET /tasks)', () => {
     expect(instances).toHaveLength(1)
     const instance = instances[0]!
     expect(instance.dueDate).toBe(addDays(yesterday, 1))
-    expect(instance.recurrenceInterval).toBeNull()
+    expect(instance.recurrenceInterval).toBe('daily')
+    expect(instance.recurrenceCount).toBe(1)
+    expect(instance.recurrenceSeriesId).toBe(created.recurrenceSeriesId)
     expect(instance.archived).toBe(false)
     const projectStatusIds = (await (await get(`/statuses?projectId=${project.id}`)).json() as any[]).map((s) => s.id)
     expect(projectStatusIds).toContain(instance.statusId)
@@ -474,5 +591,156 @@ describe('recurring task regeneration (lazy, via GET /tasks)', () => {
     const instancesAgain = secondRead.filter((t) => t.title === 'Recurring Task')
     expect(instancesAgain).toHaveLength(1)
     expect(instancesAgain[0]!.id).toBe(instance.id)
+  })
+
+  it('keeps recurrence on successors so the task regenerates after multiple completions', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-03T12:00:00.000Z'))
+    const { project, doneStatus } = await createProjectWithStatuses()
+    await post('/tasks', {
+      projectId: project.id,
+      statusId: doneStatus.id,
+      title: 'Daily forever',
+      dueDate: '2026-01-01',
+      recurrenceInterval: 'daily',
+      recurrenceCount: 1,
+    })
+
+    const afterFirstCompletion = (await (await get(`/tasks?projectId=${project.id}`)).json()) as any[]
+    const firstSuccessor = afterFirstCompletion.find((task) => task.title === 'Daily forever')!
+    expect(firstSuccessor.dueDate).toBe('2026-01-02')
+
+    await put(`/tasks/${firstSuccessor.id}`, { statusId: doneStatus.id })
+    const afterSecondCompletion = (await (await get(`/tasks?projectId=${project.id}`)).json()) as any[]
+    const secondSuccessor = afterSecondCompletion.find((task) => task.title === 'Daily forever')!
+
+    expect(secondSuccessor.id).not.toBe(firstSuccessor.id)
+    expect(secondSuccessor).toMatchObject({
+      dueDate: '2026-01-03',
+      recurrenceInterval: 'daily',
+      recurrenceCount: 1,
+      recurrenceAnchorDate: '2026-01-03',
+      completedAt: null,
+      archived: false,
+    })
+  })
+
+  it('keeps a recurring successor attached to the template parent', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-03T12:00:00.000Z'))
+    const { project, todoStatus, doneStatus } = await createProjectWithStatuses()
+    const parent = (await (
+      await post('/tasks', { projectId: project.id, statusId: todoStatus.id, title: 'Parent' })
+    ).json()) as any
+    await post('/tasks', {
+      projectId: project.id,
+      statusId: doneStatus.id,
+      parentTaskId: parent.id,
+      title: 'Recurring child',
+      dueDate: '2026-01-01',
+      recurrenceInterval: 'daily',
+      recurrenceCount: 1,
+    })
+
+    const tasks = (await (await get(`/tasks?projectId=${project.id}`)).json()) as any[]
+    const successor = tasks.find((task) => task.title === 'Recurring child')!
+
+    expect(successor.parentTaskId).toBe(parent.id)
+  })
+
+  it('does not fork the chain when a historical recurring instance is restored', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-03T12:00:00.000Z'))
+    const { project, doneStatus } = await createProjectWithStatuses()
+    const historical = (await (
+      await post('/tasks', {
+        projectId: project.id,
+        statusId: doneStatus.id,
+        title: 'One chain',
+        dueDate: '2026-01-01',
+        recurrenceInterval: 'daily',
+        recurrenceCount: 1,
+      })
+    ).json()) as any
+
+    await get(`/tasks?projectId=${project.id}`)
+    const restoreResponse = await app.request(`/tasks/${historical.id}/restore`, {
+      method: 'POST',
+      headers: H1,
+    })
+    expect(restoreResponse.status).toBe(409)
+
+    const tasks = (await (await get(`/tasks?projectId=${project.id}`)).json()) as any[]
+    const activeChain = tasks.filter(
+      (task) => task.title === 'One chain' && task.recurrenceInterval !== null,
+    )
+    expect(activeChain).toHaveLength(1)
+    expect(activeChain[0]!.dueDate).toBe('2026-01-02')
+  })
+
+  it('allows restore when only an unrelated recurring series has a later occurrence', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-03T12:00:00.000Z'))
+    const { project, doneStatus } = await createProjectWithStatuses()
+    const historical = (await (
+      await post('/tasks', {
+        projectId: project.id,
+        statusId: doneStatus.id,
+        title: 'Series to restore',
+        dueDate: '2026-01-01',
+        recurrenceInterval: 'daily',
+        recurrenceCount: 1,
+      })
+    ).json()) as any
+    await del(`/tasks/${historical.id}`)
+    await post('/tasks', {
+      projectId: project.id,
+      statusId: doneStatus.id,
+      title: 'Unrelated series',
+      dueDate: '2026-01-01',
+      recurrenceInterval: 'daily',
+      recurrenceCount: 1,
+    })
+    await get(`/tasks?projectId=${project.id}`)
+
+    const restoreResponse = await app.request(`/tasks/${historical.id}/restore`, {
+      method: 'POST',
+      headers: H1,
+    })
+
+    expect(restoreResponse.status).toBe(200)
+    expect(await restoreResponse.json()).toMatchObject({ id: historical.id, archived: false })
+  })
+
+  it('does not restore historical occurrences while restoring their parent subtree', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-03T12:00:00.000Z'))
+    const { project, todoStatus, doneStatus } = await createProjectWithStatuses()
+    const parent = (await (
+      await post('/tasks', { projectId: project.id, statusId: todoStatus.id, title: 'Parent' })
+    ).json()) as any
+    await post('/tasks', {
+      projectId: project.id,
+      statusId: doneStatus.id,
+      parentTaskId: parent.id,
+      title: 'Recurring child chain',
+      dueDate: '2026-01-01',
+      recurrenceInterval: 'daily',
+      recurrenceCount: 1,
+    })
+    await get(`/tasks?projectId=${project.id}`)
+    await del(`/tasks/${parent.id}`)
+
+    const restoreResponse = await app.request(`/tasks/${parent.id}/restore`, {
+      method: 'POST',
+      headers: H1,
+    })
+    expect(restoreResponse.status).toBe(200)
+
+    const visible = (await (await get(`/tasks?projectId=${project.id}`)).json()) as any[]
+    const activeChain = visible.filter((task) => task.title === 'Recurring child chain')
+    expect(activeChain).toHaveLength(1)
+    expect(activeChain[0]!.dueDate).toBe('2026-01-02')
+    expect(activeChain[0]!.parentTaskId).toBe(parent.id)
   })
 })

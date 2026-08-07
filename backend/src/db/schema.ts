@@ -18,8 +18,13 @@ export const users = sqliteTable('users', {
   name: text('name').notNull(),
   // Calendar week-start preference: 0 = Sunday, 1 = Monday (matches
   // JS Date#getDay()'s own numbering, so the calendar grid can use this
-  // value directly without translating it).
-  weekStartsOn: integer('week_starts_on').notNull().default(1),
+  // value directly without translating it). Nullable = "no Tafel-specific
+  // override" - the effective value (see users/router.ts's GET/PUT /me)
+  // then falls back to the platform-wide weekStart schlussel embeds in
+  // the JWT, and only to a hardcoded Monday if that's unset too. A user
+  // who explicitly picks a value here is choosing to differ from their
+  // platform default just within Tafel.
+  weekStartsOn: integer('week_starts_on'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 })
 
@@ -69,12 +74,20 @@ export const tasks = sqliteTable('tasks', {
   dueDate: text('due_date'), // ISO YYYY-MM-DD, nullable
   sortOrder: integer('sort_order').notNull().default(0), // order within (parentTaskId, statusId)
   completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
-  // Recurrence lives only on the template task; regenerated instances
-  // have these fields null (they don't themselves recur).
+  // Recurrence is carried to each generated successor so the schedule
+  // continues after every completion.
   recurrenceInterval: text('recurrence_interval', { enum: ['daily', 'weekly', 'monthly'] }),
   recurrenceCount: integer('recurrence_count'),
   recurrenceAnchorDate: text('recurrence_anchor_date'), // ISO date the schedule is computed from
+  // Stable across generated occurrences. Schedule fields are not an identity:
+  // unrelated series can legitimately have the same project, parent, cadence,
+  // and dates.
+  recurrenceSeriesId: text('recurrence_series_id'),
   archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
+  // Distinguishes tasks hidden by project archiving from tasks that were
+  // already archived independently, so project restore does not revive old
+  // recurrence instances or explicitly archived task trees.
+  archivedByProject: integer('archived_by_project', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 })
 

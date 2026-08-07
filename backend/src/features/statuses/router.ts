@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
-import { eq, and, ne } from 'drizzle-orm'
+import { eq, and, ne, asc } from 'drizzle-orm'
 import { createId } from '@paralleldrive/cuid2'
 import { db } from '../../db/index.js'
 import { statuses, projects, tasks } from '../../db/schema.js'
@@ -48,7 +48,7 @@ router.get('/', async (c) => {
   const ownershipError = await checkProjectOwnership(user.id, projectId)
   if (ownershipError) return ownershipError
 
-  return c.json(await db.select().from(statuses).where(eq(statuses.projectId, projectId)))
+  return c.json(await db.select().from(statuses).where(eq(statuses.projectId, projectId)).orderBy(asc(statuses.sortOrder)))
 })
 
 router.post('/', zValidator('json', statusSchema), async (c) => {
@@ -73,7 +73,15 @@ router.put('/:id', zValidator('json', statusUpdateSchema), async (c) => {
   const ownershipError = await checkProjectOwnership(user.id, existing.projectId)
   if (ownershipError) return ownershipError
 
-  await db.update(statuses).set(data).where(eq(statuses.id, id))
+  db.transaction((tx) => {
+    tx.update(statuses).set(data).where(eq(statuses.id, id)).run()
+    if (data.isDone !== undefined && data.isDone !== existing.isDone) {
+      tx.update(tasks)
+        .set({ completedAt: data.isDone ? new Date() : null })
+        .where(and(eq(tasks.statusId, id), eq(tasks.archived, false)))
+        .run()
+    }
+  })
   return c.json({ ...existing, ...data })
 })
 
@@ -92,7 +100,7 @@ router.delete('/:id', async (c) => {
   if (ownershipError) return ownershipError
 
   const tasksUsingStatus = await db.select().from(tasks)
-    .where(and(eq(tasks.statusId, id), eq(tasks.archived, false)))
+    .where(eq(tasks.statusId, id))
 
   if (tasksUsingStatus.length > 0) {
     if (!reassignTo) {
@@ -103,7 +111,19 @@ router.delete('/:id', async (c) => {
       .get()
     if (!target) return c.json({ error: 'reassignTo status not found in this project' }, 404)
 
-    await db.update(tasks).set({ statusId: reassignTo }).where(eq(tasks.statusId, id))
+    let completedAt: Date | null | undefined
+    if (target.isDone && !existing.isDone) completedAt = new Date()
+    else if (!target.isDone && existing.isDone) completedAt = null
+    db.transaction((tx) => {
+      tx.update(tasks).set({
+        statusId: reassignTo,
+        ...(completedAt !== undefined ? { completedAt } : {}),
+      }).where(and(eq(tasks.statusId, id), eq(tasks.archived, false))).run()
+      tx.update(tasks).set({ statusId: reassignTo })
+        .where(and(eq(tasks.statusId, id), eq(tasks.archived, true))).run()
+      tx.delete(statuses).where(eq(statuses.id, id)).run()
+    })
+    return c.json({ ok: true })
   }
 
   await db.delete(statuses).where(eq(statuses.id, id))

@@ -22,6 +22,15 @@ fit best; add a new section if none fits.
 - Recurring tasks (daily/weekly/monthly) regenerate lazily on the next
   `GET /tasks`/`GET /stats/summary` read once the current instance is
   done - no cron/scheduler, transaction-wrapped duplicate check.
+- Recurrence is now a continuing series: successors retain cadence and
+  parentage, share a stable `recurrenceSeriesId`, and atomically archive
+  the completed occurrence before creating the next one. Restoring a
+  historical occurrence is rejected when a later member of that series
+  already exists.
+- Project archive records provenance in `archivedByProject`, allowing
+  project restore to revive only tasks hidden by that project operation;
+  explicit task archives remain archived. Task restore is recursive and
+  requires the project and all ancestors to be active.
 - Every timestamp column uses `mode: 'timestamp_ms'` (millisecond
   precision, exact round-trip) rather than the more common
   `mode: 'timestamp'` (seconds, silently truncates precision on every
@@ -30,6 +39,9 @@ fit best; add a new section if none fits.
 ## API
 - `GET /tasks` drill-in filtering: `parentTaskId=` (empty) → top-level
   only, a real id → that task's direct children, omitted → every depth.
+- `GET /projects?archived=true` lists archived projects;
+  `POST /projects/:id/restore` and `POST /tasks/:id/restore` expose the
+  corresponding provenance-aware restore operations.
 - `PUT /tasks/:id/reorder` - dedicated lightweight endpoint for kanban
   drag-and-drop.
 - `DELETE /statuses/:id` requires an explicit `?reassignTo=` when tasks
@@ -59,6 +71,29 @@ fit best; add a new section if none fits.
   `timestamp_ms` schema change above, the column was seconds-precision,
   so dividing by 1000 a second time collapsed every real date to right
   around the 1970 epoch, matching nothing in the 14-day window.
+- Completion trends, overdue dates, and streak boundaries now use the
+  caller's Schlüssel profile timezone (UTC fallback). Streaks walk full
+  history rather than stopping at the 14-day chart boundary.
+- Status completion transitions have one consistent contract across
+  task updates, kanban reorder, status toggles, and status deletion:
+  entering done sets `completedAt`, done-to-done preserves it, leaving
+  done clears it, and archived task history is not rewritten.
+- `GET /users/export` returns all caller-owned Tafel projects, statuses,
+  and tasks, including archived data, under the fixed
+  `tafel-account-only` scope.
+- `GET /users/me` now separates effective `weekStartsOn` from nullable
+  `weekStartsOnOverride`, while exposing Schlüssel-owned `dateFormat`
+  and `timezone` as read-only token values. Sending `null` to
+  `PUT /users/me` clears the Tafel override.
+- OpenAPI now describes complete entity/export/profile/stat responses,
+  exact partial-update bodies, recurrence fields, recursive archive and
+  restore conflicts, task-list depth filters, and status-history
+  semantics instead of only listing routes.
+
+## Migrations
+- Existing graphs survive the nullable week-start table rebuild. Follow-up
+  migrations backfill `archivedByProject` for already archived projects
+  and seed `recurrenceSeriesId` from each existing recurring task's id.
 
 ## Frontend
 - Three views over one task/project data model: a recursive expandable

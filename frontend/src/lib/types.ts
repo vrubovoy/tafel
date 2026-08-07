@@ -25,6 +25,7 @@ export interface Task {
   recurrenceCount: number | null
   recurrenceAnchorDate: string | null
   archived: boolean
+  archivedByProject?: boolean
 }
 
 export const PRIORITY_LABELS: Record<Priority, string> = {

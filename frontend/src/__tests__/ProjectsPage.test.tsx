@@ -56,9 +56,10 @@ function createWrapper() {
   )
 }
 
-function mockProjectsList(list: typeof projects) {
+function mockProjectsList(list: typeof projects, archived: typeof projects = []) {
   vi.mocked(api.get).mockImplementation((path: string) => {
-    if (path === '/projects') return Promise.resolve(list)
+    if (path === '/projects' || path === '/projects?archived=false') return Promise.resolve(list)
+    if (path === '/projects?archived=true') return Promise.resolve(archived)
     return Promise.reject(new Error(`Unexpected GET ${path}`))
   })
 }
@@ -99,6 +100,25 @@ describe('ProjectsPage listing', () => {
     await vi.waitFor(() => {
       expect(findByLooseName(/созда|добав|new|нов.*проект|проект/i).length).toBeGreaterThan(0)
     })
+  })
+
+  it('lists archived projects and restores one through its restore endpoint', async () => {
+    const archived = [{ ...projects[0]!, id: 'archived-1', name: 'Archived project', archived: true }]
+    mockProjectsList(projects, archived)
+    vi.mocked(api.post).mockResolvedValue({ ...archived[0], archived: false })
+    const user = userEvent.setup()
+
+    render(<ProjectsPage />, { wrapper: createWrapper() })
+    await screen.findByText('Personal')
+    await user.click(screen.getByRole('button', { name: /архивные|archived/i }))
+
+    await screen.findByText('Archived project')
+    expect(api.get).toHaveBeenCalledWith('/projects?archived=true')
+    await user.click(screen.getByRole('button', { name: /восстановить.*проект|restore.*project/i }))
+    await vi.waitFor(() => {
+      expect(api.post).toHaveBeenCalled()
+    })
+    expect(vi.mocked(api.post).mock.calls[0]![0]).toBe('/projects/archived-1/restore')
   })
 })
 
