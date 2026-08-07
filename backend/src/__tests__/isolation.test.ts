@@ -158,6 +158,22 @@ describe('Task isolation', () => {
   })
 })
 
+describe('Export isolation', () => {
+  it('scopes a delegated export to its subject rather than the delegating service', async () => {
+    const user1Project = (await (await asUser1.post('/projects', { name: 'User 1 data' })).json()) as any
+    const user2Project = (await (await asUser2.post('/projects', { name: 'User 2 data' })).json()) as any
+
+    const res = await app.request('/exports/me', {
+      headers: { Authorization: 'Bearer tafel-export-user2-token' },
+    })
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as any
+    expect(body.data.projects.map((project: any) => project.id)).toEqual([user2Project.id])
+    expect(JSON.stringify(body.data)).not.toContain(user1Project.id)
+  })
+})
+
 // ── Cross-project parent (422) ────────────────────────────────────
 describe('POST /tasks cross-project parent', () => {
   it('returns 422 when parentTaskId belongs to a different project than projectId (same owner)', async () => {

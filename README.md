@@ -123,10 +123,43 @@ streak: counting starts today and stops at the first local calendar day with no
 completion. Archived completed occurrences remain part of this completion
 history even though archived tasks are excluded from active totals.
 
-`GET /users/export` returns every caller-owned project, status, and task,
-including archived projects and historical recurring occurrences. Its fixed
-scope is `tafel-account-only`; it excludes the account profile and data from
+`GET /exports/me` is the standardized synchronous JSON export used by Tafel's
+direct download action and as an input to Schlüssel's separate platform ZIP
+orchestration. It returns the strict version 1 envelope (`version`, `service`,
+`exportedAt`, and `data`) with the nullable Tafel-local `weekStartsOn` override
+plus every subject-owned project, status, and task, including archived rows and
+historical recurring occurrences. All local data is read in one synchronous
+SQLite transaction so the response represents one consistent snapshot.
+
+The endpoint accepts either a normal Schlüssel access token or a short-lived
+export delegation with the exact `hof-service:tafel` audience and
+`data:export` scope, `token_use: export`, and nonempty subject, job, and token
+IDs plus a non-expired numeric `exp`, verified through the configured JWKS and
+exact issuer. Delegations are restricted to `/exports/me`, and the snapshot is
+always scoped to the verified principal subject. Ordinary API routes continue
+to require a full access token. Export responses are private, no-store, and
+nosniff.
+
+The existing `GET /users/export` endpoint remains available for direct clients
+with its legacy top-level response (`scope: tafel-account-only`, `exportedAt`,
+`projects`, `statuses`, and `tasks`). It excludes profile data and data from
 other Hof services.
+
+Only Schlüssel's asynchronous `/export-jobs` API creates an all-services ZIP.
+Each service takes its local snapshot when called, so files can have different
+timestamps and the archive is not a distributed point-in-time transaction.
+Retries preserve successful files and capture failed services later. If at
+least one service succeeds and at least one fails, a partial ZIP remains
+available; `manifest.json` records statuses, attempts, timestamps, byte counts,
+SHA-256 checksums, file names, and sanitized failures.
+
+Schlüssel's ZIP is an authenticated, owner-only, no-store download with a
+short artifact TTL (24 hours by default), per-user cooldown and retained-job/
+byte limits, response-size bounds, a global storage quota, and a free-space
+reserve. Export files contain sensitive task content. Tafel exports its local
+week-start override and caller-owned project/status/task graph only; it excludes
+account credentials and tokens, server configuration and logs, internal worker
+or audit state, other users, and other services' data.
 
 ## Local development
 
@@ -158,6 +191,12 @@ pnpm --filter frontend lint
 | `TAFEL_ALLOWED_ORIGINS` | Comma-separated CORS allowlist; Compose maps it to the backend's `ALLOWED_ORIGINS` |
 | `SCHLUSSEL_WEB_URL` | Where sign-in redirects; Compose passes it as the frontend build's `VITE_SCHLUSSEL_URL` |
 | `SCHLOSS_URL` | Where the header's "На главную" link points; Compose passes it as `VITE_SCHLOSS_URL` |
+
+Normal and delegated export tokens use the same `SCHLUSSEL_JWKS_URL` and
+`JWT_ISSUER`; the Tafel delegation audience is fixed by the service as
+`hof-service:tafel`. The shared auth version used here requires ordinary JWTs
+to carry `token_use: access`. Deploy the matching Schlüssel issuer change and
+allow previously issued access tokens to expire before deploying this version.
 
 When running the packages directly instead of through Compose, defaults support
 the standard local ports. Override them with `DATABASE_PATH`, `ALLOWED_ORIGINS`,

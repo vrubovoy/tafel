@@ -12,6 +12,7 @@ import { statusesRouter } from './features/statuses/router.js'
 import { tasksRouter } from './features/tasks/router.js'
 import { statsRouter } from './features/stats/router.js'
 import { usersRouter } from './features/users/router.js'
+import { exportsRouter } from './features/exports/router.js'
 import { requireAuth, requireAdmin } from './middleware/auth.js'
 import { openApiDocument } from './openapi.js'
 
@@ -47,6 +48,7 @@ app.route('/statuses', statusesRouter)
 app.route('/tasks', tasksRouter)
 app.route('/stats', statsRouter)
 app.route('/users', usersRouter)
+app.route('/exports', exportsRouter)
 
 const PORT = Number(process.env['PORT'] ?? 3002)
 serve({ fetch: app.fetch, port: PORT }, () => {
