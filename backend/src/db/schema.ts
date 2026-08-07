@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, uniqueIndex, index, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
 // Every timestamp column here uses `mode: 'timestamp_ms'`, not the more
 // common `mode: 'timestamp'` - the latter stores epoch *seconds*
@@ -25,6 +25,17 @@ export const users = sqliteTable('users', {
   // who explicitly picks a value here is choosing to differ from their
   // platform default just within Tafel.
   weekStartsOn: integer('week_starts_on'),
+  // Mirrored from the JWT's own weekStart/timezone claims on every
+  // request (see middleware/auth.ts's onUserSeen) - "coalesce, don't
+  // clobber": a request whose token has no timezone (or an admin/service
+  // token, or an old cached token from before this claim existed) never
+  // erases an already-known value, it just leaves it as-is. Needed
+  // locally (not just read live off the request's own token) because the
+  // due-date notification scanner (features/notifications/scanner.ts)
+  // runs on a timer, with no request/token in scope at all, and still
+  // needs each owner's timezone to compute "is this task due today" per
+  // owner rather than in server-local time.
+  timezone: text('timezone'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 })
 
@@ -91,7 +102,39 @@ export const tasks = sqliteTable('tasks', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 })
 
+// ── Notification outbox ─────────────────────────────────────────────
+// Transactional-outbox row for the shared generic dispatcher
+// (@zudar107/schloss-server-kit's createNotificationOutboxRuntime, wired
+// up in notifications/outbox.ts). `dedupe_key` is Tafel's own dedupe
+// policy (deliberately not shared with any other service): the due-date
+// scanner (notifications/scanner.ts) computes it as
+// `${taskId}:${dueDate}:${occurrence}` (occurrence = 'due-today' or
+// 'overdue') and relies on this unique index to make a re-scan of an
+// already-notified task a silent no-op rather than a duplicate event -
+// changing a task's due date naturally produces a fresh key, so the
+// notification fires again for the new date.
+export const notificationOutbox = sqliteTable('notification_outbox', {
+  id: text('id').primaryKey(),
+  eventType: text('event_type').notNull(),
+  userId: text('user_id').notNull(),
+  payload: text('payload').notNull(),
+  correlationId: text('correlation_id').notNull(),
+  dedupeKey: text('dedupe_key').notNull(),
+  state: text('state').notNull().default('pending'),
+  createdAt: integer('created_at').notNull(),
+  attempts: integer('attempts').notNull().default(0),
+  nextAttemptAt: integer('next_attempt_at'),
+  leaseId: text('lease_id'),
+  leaseUntil: integer('lease_until'),
+  deliveredAt: integer('delivered_at'),
+  lastError: text('last_error'),
+}, (table) => [
+  uniqueIndex('notification_outbox_dedupe_key_unique').on(table.dedupeKey),
+  index('notification_outbox_dispatch_idx').on(table.state, table.nextAttemptAt),
+])
+
 export type User = typeof users.$inferSelect
 export type Project = typeof projects.$inferSelect
 export type Status = typeof statuses.$inferSelect
 export type Task = typeof tasks.$inferSelect
+export type NotificationOutboxRow = typeof notificationOutbox.$inferSelect

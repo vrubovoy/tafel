@@ -29,6 +29,22 @@ services:
       # env var name is still plain ALLOWED_ORIGINS below - only the
       # outer name changed.
       ALLOWED_ORIGINS: ${TAFEL_ALLOWED_ORIGINS:-https://localhost,https://tafel.localhost}
+      # Notification outbox delivery (see features/notifications/outbox.ts)
+      # and the due-date scanner (features/notifications/scanner.ts) - same
+      # tuning-knob names as every other producer, so one shared .env
+      # default applies identically everywhere. Left unset, due-date
+      # events still get recorded but queue up undelivered.
+      GLOCKE_BASE_URL: ${GLOCKE_BASE_URL:-http://glocke-backend:3004}
+      TAFEL_TO_GLOCKE_HMAC_KEY_ID: ${TAFEL_TO_GLOCKE_HMAC_KEY_ID:-tafel-v1}
+      TAFEL_TO_GLOCKE_HMAC_SECRET: ${TAFEL_TO_GLOCKE_HMAC_SECRET:-}
+      GLOCKE_DISPATCH_INTERVAL_MS: ${GLOCKE_DISPATCH_INTERVAL_MS:-1000}
+      GLOCKE_OUTBOX_LEASE_MS: ${GLOCKE_OUTBOX_LEASE_MS:-30000}
+      GLOCKE_FETCH_TIMEOUT_MS: ${GLOCKE_FETCH_TIMEOUT_MS:-10000}
+      GLOCKE_WORKER_STOP_TIMEOUT_MS: ${GLOCKE_WORKER_STOP_TIMEOUT_MS:-5000}
+      GLOCKE_MAX_ATTEMPTS: ${GLOCKE_MAX_ATTEMPTS:-8}
+      GLOCKE_RETRY_BASE_DELAY_MS: ${GLOCKE_RETRY_BASE_DELAY_MS:-1000}
+      GLOCKE_RETRY_MAX_DELAY_MS: ${GLOCKE_RETRY_MAX_DELAY_MS:-900000}
+      TAFEL_DUE_SCAN_INTERVAL_MS: ${TAFEL_DUE_SCAN_INTERVAL_MS:-3600000}
     volumes:
       - tafel-data:/data
     networks:
