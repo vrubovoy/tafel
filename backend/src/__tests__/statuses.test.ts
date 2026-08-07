@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 vi.mock('../db/index.js', async () => await import('./helpers/db.js'))
 vi.mock('../middleware/auth.js', async () => await import('./helpers/auth-mock.js'))
 
-import { cleanDb } from './helpers/db.js'
+import { cleanDb, sqlite } from './helpers/db.js'
 import { createTestApp } from './helpers/setup.js'
 
 const app = createTestApp()
@@ -109,6 +109,46 @@ describe('PUT /statuses/:id', () => {
     expect(body.isDone).toBe(true)
   })
 
+  it('sets and clears completedAt for every task when isDone is toggled', async () => {
+    const project = await createProject()
+    const statuses = (await (await get(`/statuses?projectId=${project.id}`)).json()) as any[]
+    const status = statuses.find((item) => item.isDone === false)!
+    const task = (await (
+      await post('/tasks', { projectId: project.id, statusId: status.id, title: 'Toggle with column' })
+    ).json()) as any
+    expect(task.completedAt).toBeNull()
+
+    await put(`/statuses/${status.id}`, { isDone: true })
+    let updated = ((await (await get('/tasks')).json()) as any[]).find((item) => item.id === task.id)!
+    expect(updated.completedAt).not.toBeNull()
+
+    await put(`/statuses/${status.id}`, { isDone: false })
+    updated = ((await (await get('/tasks')).json()) as any[]).find((item) => item.id === task.id)!
+    expect(updated.completedAt).toBeNull()
+  })
+
+  it('does not rewrite the completion timestamp of an archived historical task when isDone changes', async () => {
+    const project = await createProject()
+    const statuses = (await (await get(`/statuses?projectId=${project.id}`)).json()) as any[]
+    const done = statuses.find((status) => status.isDone)!
+    const active = (await (
+      await post('/tasks', { projectId: project.id, statusId: done.id, title: 'Active completion' })
+    ).json()) as any
+    const historical = (await (
+      await post('/tasks', { projectId: project.id, statusId: done.id, title: 'Historical completion' })
+    ).json()) as any
+    await del(`/tasks/${historical.id}`)
+    const originalCompletedAt = Date.parse(historical.completedAt)
+
+    const res = await put(`/statuses/${done.id}`, { isDone: false })
+
+    expect(res.status).toBe(200)
+    expect(sqlite.prepare('SELECT completed_at FROM tasks WHERE id = ?').get(active.id))
+      .toEqual({ completed_at: null })
+    expect(sqlite.prepare('SELECT completed_at FROM tasks WHERE id = ?').get(historical.id))
+      .toEqual({ completed_at: originalCompletedAt })
+  })
+
   it('returns 404 for an unknown id', async () => {
     const res = await put('/statuses/nonexistent', { name: 'X' })
     expect(res.status).toBe(404)
@@ -140,6 +180,31 @@ describe('DELETE /statuses/:id', () => {
 
     const remaining = (await (await get(`/statuses?projectId=${project.id}`)).json()) as any[]
     expect(remaining.find((s) => s.id === status.id)).toBeDefined()
+  })
+
+  it('requires reassignment for archived references and preserves their historical completion timestamp', async () => {
+    const project = await createProject()
+    const statuses = (await (await get(`/statuses?projectId=${project.id}`)).json()) as any[]
+    const from = statuses.find((status) => status.isDone)!
+    const to = statuses.find((status) => !status.isDone)!
+    const historical = (await (
+      await post('/tasks', { projectId: project.id, statusId: from.id, title: 'Archived reference' })
+    ).json()) as any
+    await del(`/tasks/${historical.id}`)
+    const originalCompletedAt = Date.parse(historical.completedAt)
+
+    const blocked = await del(`/statuses/${from.id}`)
+    expect(blocked.status).toBe(409)
+
+    const reassigned = await del(`/statuses/${from.id}?reassignTo=${to.id}`)
+    expect(reassigned.status).toBe(200)
+    expect(sqlite.prepare(
+      'SELECT status_id, completed_at, archived FROM tasks WHERE id = ?',
+    ).get(historical.id)).toEqual({
+      status_id: to.id,
+      completed_at: originalCompletedAt,
+      archived: 1,
+    })
   })
 
   it('reassigns referencing tasks and deletes when reassignTo points to a status in the same project', async () => {

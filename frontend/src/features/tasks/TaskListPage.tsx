@@ -2,10 +2,10 @@ import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearch, useNavigate } from '@tanstack/react-router'
 import { Plus, List as ListIcon, ChevronRight, ChevronDown, Calendar as CalendarIcon, Trash2 } from 'lucide-react'
-import { EmptyState, ICON_SIZE, Button, Badge } from '@zudar107/schloss-ui'
+import { EmptyState, ICON_SIZE, Button, Badge, formatDate } from '@zudar107/schloss-ui'
 import { api } from '../../lib/api'
 import { useToast } from '../../hooks/useToast'
-import { formatDate } from '../../lib/format'
+import { useDateFormat } from '../../hooks/useDateFormat'
 import type { Project } from '../projects/ProjectsPage'
 import type { Status, Task } from '../../lib/types'
 import { PRIORITY_COLORS } from '../../lib/types'
@@ -194,6 +194,7 @@ function TaskTreeRow({ task, depth, statusById, childrenOf, collapsed, onToggleC
   const hasChildren = children.length > 0
   const isCollapsed = collapsed.has(task.id)
   const status = statusById.get(task.statusId)
+  const { dateFormat, timezone } = useDateFormat()
 
   return (
     <div>
@@ -235,7 +236,7 @@ function TaskTreeRow({ task, depth, statusById, childrenOf, collapsed, onToggleC
 
         {task.dueDate && (
           <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            <CalendarIcon size={12} /> {formatDate(task.dueDate)}
+            <CalendarIcon size={12} /> {formatDate(task.dueDate, { dateFormat, timezone })}
           </span>
         )}
 

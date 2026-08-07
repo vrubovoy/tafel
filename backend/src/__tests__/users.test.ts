@@ -124,14 +124,21 @@ describe('PUT /users/me', () => {
     expect(body.weekStartsOn).toBe(0)
   })
 
-  it('rejects a null weekStartsOn with 400 and does not change the persisted value', async () => {
+  it('accepts a null weekStartsOn, clearing the Tafel-specific override back to the platform default', async () => {
     await put('/users/me', { weekStartsOn: 0 })
     const res = await put('/users/me', { weekStartsOn: null })
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as any
+    expect(body.weekStartsOnOverride).toBe(null)
+    // The mock auth user has no platform-wide weekStart preference either
+    // (see helpers/auth-mock.ts), so the effective value falls all the
+    // way back to Tafel's own historical default, Monday.
+    expect(body.weekStartsOn).toBe(1)
 
     const getRes = await get('/users/me')
-    const body = (await getRes.json()) as any
-    expect(body.weekStartsOn).toBe(0)
+    const getBody = (await getRes.json()) as any
+    expect(getBody.weekStartsOnOverride).toBe(null)
+    expect(getBody.weekStartsOn).toBe(1)
   })
 
   it('returns 401 without an Authorization header', async () => {

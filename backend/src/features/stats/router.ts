@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { eq, and, sql } from 'drizzle-orm'
+import { eq, and, isNotNull, sql } from 'drizzle-orm'
 import { db } from '../../db/index.js'
 import { tasks } from '../../db/schema.js'
 import { requireAuth } from '../../middleware/auth.js'
@@ -8,8 +8,22 @@ import { regenerateDueRecurringTasks } from '../tasks/router.js'
 const router = new Hono()
 router.use('*', requireAuth)
 
-function toISODate(d: Date): string {
-  return d.toISOString().slice(0, 10)
+function dateKey(date: Date, timezone: string | null): string {
+  if (!timezone) return date.toISOString().slice(0, 10)
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)!.value
+  return `${value('year')}-${value('month')}-${value('day')}`
+}
+
+function addDays(day: string, amount: number): string {
+  const [year, month, date] = day.split('-').map(Number)
+  const shifted = new Date(Date.UTC(year!, month! - 1, date! + amount))
+  return shifted.toISOString().slice(0, 10)
 }
 
 router.get('/summary', async (c) => {
@@ -19,7 +33,7 @@ router.get('/summary', async (c) => {
   // the same check.
   await regenerateDueRecurringTasks(user.id)
 
-  const today = toISODate(new Date())
+  const today = dateKey(new Date(), user.timezone)
 
   // COALESCE is required here, not just a JS-side `?? 0` on the result -
   // SQLite's SUM() over zero matching rows (a user with no tasks at all)
@@ -52,32 +66,25 @@ router.get('/summary', async (c) => {
   `)
 
   // 14-day completion trend, oldest to newest, today inclusive.
-  const dayBuckets: string[] = []
-  const start = new Date()
-  start.setDate(start.getDate() - 13)
-  for (let i = 0; i < 14; i++) {
-    const d = new Date(start)
-    d.setDate(d.getDate() + i)
-    dayBuckets.push(toISODate(d))
+  const dayBuckets = Array.from({ length: 14 }, (_, index) => addDays(today, index - 13))
+  const completionRows = await db.select({ completedAt: tasks.completedAt }).from(tasks).where(and(
+    eq(tasks.userId, user.id),
+    isNotNull(tasks.completedAt),
+  ))
+  const completionByDay = new Map<string, number>()
+  for (const row of completionRows) {
+    const day = dateKey(row.completedAt!, user.timezone)
+    completionByDay.set(day, (completionByDay.get(day) ?? 0) + 1)
   }
-  // completedAt is stored as epoch *milliseconds* (schema.ts uses
-  // `mode: 'timestamp_ms'`) - SQLite's 'unixepoch' modifier expects
-  // seconds, hence the /1000.
-  const completionRows = await db.all<{ day: string; count: number }>(sql`
-    SELECT date(t.completed_at / 1000, 'unixepoch') AS day, COUNT(*) AS count
-    FROM tasks t
-    WHERE t.user_id = ${user.id} AND t.completed_at IS NOT NULL
-      AND date(t.completed_at / 1000, 'unixepoch') >= ${dayBuckets[0]}
-    GROUP BY day
-  `)
-  const completionByDay = new Map(completionRows.map((r) => [r.day, r.count]))
   const completedLast14Days = dayBuckets.map((day) => completionByDay.get(day) ?? 0)
 
-  // Current streak: consecutive days ending today with >=1 completion.
+  // Current streak uses complete history; the 14-day series is only the
+  // chart window and must not cap a longer run.
   let currentStreak = 0
-  for (let i = completedLast14Days.length - 1; i >= 0; i--) {
-    if (completedLast14Days[i] === 0) break
+  let expectedDay = today
+  while (completionByDay.has(expectedDay)) {
     currentStreak++
+    expectedDay = addDays(expectedDay, -1)
   }
 
   const activeRecurringRows = await db.select().from(tasks).where(and(

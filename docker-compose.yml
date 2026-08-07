@@ -17,7 +17,7 @@ services:
     restart: unless-stopped
     environment:
       PORT: 3002
-      DATABASE_PATH: /data/tafel.db
+      DATABASE_PATH: ${TAFEL_DATABASE_PATH:-/data/tafel.db}
       SCHLUSSEL_JWKS_URL: ${SCHLUSSEL_JWKS_URL:-http://schlussel:4000/.well-known/jwks.json}
       # Must match schlussel's own JWT_ISSUER (hardcoded to "schlussel" in
       # schlussel/docker-compose.yml).

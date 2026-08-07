@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 vi.mock('../db/index.js', async () => await import('./helpers/db.js'))
 vi.mock('../middleware/auth.js', async () => await import('./helpers/auth-mock.js'))
@@ -10,13 +10,16 @@ const app = createTestApp()
 
 const H1 = { Authorization: 'Bearer test-token' }
 const H2 = { Authorization: 'Bearer user2-token' }
+const H_TIMEZONE = { Authorization: 'Bearer timezone-test-token' }
 const JSON_H1 = { ...H1, 'Content-Type': 'application/json' }
+const JSON_H_TIMEZONE = { ...H_TIMEZONE, 'Content-Type': 'application/json' }
 
 const get = (path: string, headers = H1) => app.request(path, { headers })
 const post = (path: string, body: unknown, headers = JSON_H1) =>
   app.request(path, { method: 'POST', headers, body: JSON.stringify(body) })
 
 beforeEach(() => cleanDb())
+afterEach(() => vi.useRealTimers())
 
 function addDays(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split('-').map(Number)
@@ -102,6 +105,47 @@ describe('GET /stats/summary', () => {
     const totalCompletedInWindow = (body.completedLast14Days as number[]).reduce((a, b) => a + b, 0)
     expect(totalCompletedInWindow).toBeGreaterThanOrEqual(1)
     expect(body.currentStreak).toBeGreaterThanOrEqual(1)
+  })
+
+  it('calculates a current streak longer than the 14-day chart window', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T12:00:00.000Z'))
+    const { project, doneStatus } = await createProjectWithStatuses()
+
+    for (let day = 1; day <= 15; day++) {
+      vi.setSystemTime(new Date(`2026-01-${String(day).padStart(2, '0')}T12:00:00.000Z`))
+      await post('/tasks', {
+        projectId: project.id,
+        statusId: doneStatus.id,
+        title: `Completed on day ${day}`,
+      })
+    }
+
+    const body = (await (await get('/stats/summary')).json()) as any
+    expect(body.completedLast14Days).toHaveLength(14)
+    expect(body.completedLast14Days).toEqual(Array(14).fill(1))
+    expect(body.currentStreak).toBe(15)
+  })
+
+  it('calculates the current streak in the profile timezone', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T23:30:00.000Z'))
+    const { project, doneStatus } = await createProjectWithStatuses(
+      'Timezone project',
+      JSON_H_TIMEZONE,
+    )
+    await post('/tasks', {
+      projectId: project.id,
+      statusId: doneStatus.id,
+      title: 'Completed on the local day',
+    }, JSON_H_TIMEZONE)
+
+    // UTC has crossed into Jan 2, but Los Angeles is still on Jan 1.
+    vi.setSystemTime(new Date('2026-01-02T01:00:00.000Z'))
+    const body = (await (await get('/stats/summary', H_TIMEZONE)).json()) as any
+
+    expect(body.currentStreak).toBe(1)
+    expect(body.completedLast14Days.at(-1)).toBe(1)
   })
 
   it('counts activeRecurringTasks for tasks with a non-null recurrenceInterval that are not archived', async () => {

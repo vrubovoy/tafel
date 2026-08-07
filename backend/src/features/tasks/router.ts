@@ -67,6 +67,9 @@ async function checkProjectOwnership(userId: string, projectId: string): Promise
   const project = await db.select().from(projects)
     .where(and(eq(projects.id, projectId), eq(projects.userId, userId))).get()
   if (!project) return Response.json({ error: 'Project not found' }, { status: 404 })
+  if (project.archived) {
+    return Response.json({ error: 'Cannot add or move tasks to an archived project' }, { status: 409 })
+  }
   return null
 }
 
@@ -128,6 +131,20 @@ async function collectDescendantIds(taskId: string): Promise<string[]> {
   return rows.map((r) => r.id)
 }
 
+async function hasArchivedAncestor(task: Task): Promise<boolean> {
+  if (!task.parentTaskId) return false
+  const rows = await db.all<{ archived: number }>(sql`
+    WITH RECURSIVE ancestors(id, parent_task_id, archived) AS (
+      SELECT id, parent_task_id, archived FROM tasks WHERE id = ${task.parentTaskId}
+      UNION ALL
+      SELECT t.id, t.parent_task_id, t.archived
+      FROM tasks t JOIN ancestors a ON t.id = a.parent_task_id
+    )
+    SELECT archived FROM ancestors WHERE archived = 1
+  `)
+  return rows.length > 0
+}
+
 // ── Recurring tasks - lazy, no cron ─────────────────────────────────
 // Regenerated the next time the task list (or stats) is read, once the
 // template itself is marked done - never a scheduled job, matching
@@ -177,43 +194,37 @@ export async function regenerateDueRecurringTasks(userId: string): Promise<void>
       .orderBy(asc(statuses.sortOrder))
       .get()
     if (!defaultStatus) continue
+    const recurrenceSeriesId = template.recurrenceSeriesId ?? template.id
 
-    // better-sqlite3 executes synchronously and Node is single-threaded,
-    // so no other request handler can interleave between this duplicate
-    // check and the insert within the same transaction - two near-
-    // simultaneous GET /tasks calls (e.g. two open tabs) can't both
-    // insert a successor for the same occurrence.
+    // Claim the completed instance by archiving it first. The conditional
+    // update is atomic, so concurrent readers cannot both generate its
+    // successor, while unrelated recurring tasks may share a title/date.
     db.transaction((tx) => {
-      const dup = tx.select().from(tasks).where(and(
-        eq(tasks.userId, userId),
-        eq(tasks.title, template.title),
-        eq(tasks.recurrenceAnchorDate, nextDueIso),
-        eq(tasks.archived, false),
-      )).get()
-      if (dup) return
+      const claimed = tx.update(tasks).set({ archived: true, recurrenceSeriesId })
+        .where(and(eq(tasks.id, template.id), eq(tasks.archived, false)))
+        .run()
+      if (claimed.changes === 0) return
 
       tx.insert(tasks).values({
         id: createId(),
         userId,
         projectId: template.projectId,
         statusId: defaultStatus.id,
-        parentTaskId: null,
+        parentTaskId: template.parentTaskId,
         title: template.title,
         description: template.description,
         priority: template.priority,
         dueDate: nextDueIso,
         sortOrder: 0,
         completedAt: null,
-        recurrenceInterval: null,
-        recurrenceCount: null,
+        recurrenceInterval: template.recurrenceInterval,
+        recurrenceCount: template.recurrenceCount,
         recurrenceAnchorDate: nextDueIso,
+        recurrenceSeriesId,
         archived: false,
+        archivedByProject: false,
         createdAt: now,
       }).run()
-
-      // Archive the completed template itself so it doesn't keep
-      // matching future regeneration passes.
-      tx.update(tasks).set({ archived: true }).where(eq(tasks.id, template.id)).run()
     })
   }
 }
@@ -251,12 +262,15 @@ router.post('/', zValidator('json', taskSchema), async (c) => {
 
   const status = await db.select().from(statuses).where(eq(statuses.id, data.statusId)).get()
   const now = new Date()
+  const id = createId()
   const task = {
-    id: createId(),
+    id,
     userId: user.id,
     ...data,
     completedAt: status?.isDone ? now : null,
+    recurrenceSeriesId: data.recurrenceInterval ? id : null,
     archived: false,
+    archivedByProject: false,
     createdAt: now,
   }
   await db.insert(tasks).values(task)
@@ -272,29 +286,87 @@ router.put('/:id', zValidator('json', taskUpdateSchema), async (c) => {
   if (!existing) return c.json({ error: 'Not found' }, 404)
 
   const projectId = data.projectId ?? existing.projectId
-  if (data.projectId) {
-    const projectError = await checkProjectOwnership(user.id, data.projectId)
+  const changingProject = projectId !== existing.projectId
+  if (changingProject) {
+    const sourceProject = await db.select().from(projects)
+      .where(and(eq(projects.id, existing.projectId), eq(projects.userId, user.id))).get()
+    if (sourceProject?.archived) {
+      return c.json({ error: 'Restore the project before moving its tasks' }, 409)
+    }
+    const projectError = await checkProjectOwnership(user.id, projectId)
     if (projectError) return projectError
   }
-  if (data.statusId) {
-    const statusError = await checkStatusOwnership(projectId, data.statusId)
+
+  let statusId = data.statusId ?? existing.statusId
+  if (changingProject && !data.statusId) {
+    const defaultStatus = await db.select().from(statuses)
+      .where(and(eq(statuses.projectId, projectId), eq(statuses.isDone, false)))
+      .orderBy(asc(statuses.sortOrder))
+      .get()
+      ?? await db.select().from(statuses)
+        .where(eq(statuses.projectId, projectId))
+        .orderBy(asc(statuses.sortOrder))
+        .get()
+    if (!defaultStatus) return c.json({ error: 'Target project has no statuses' }, 422)
+    statusId = defaultStatus.id
+  }
+  if (data.statusId || changingProject) {
+    const statusError = await checkStatusOwnership(projectId, statusId)
     if (statusError) return statusError
   }
-  if (data.parentTaskId !== undefined) {
-    const parentError = await checkParentTaskOwnership(user.id, projectId, data.parentTaskId, id)
+
+  const parentTaskId = changingProject ? (data.parentTaskId ?? null) : data.parentTaskId
+  if (parentTaskId !== undefined) {
+    const parentError = await checkParentTaskOwnership(user.id, projectId, parentTaskId, id)
     if (parentError) return parentError
   }
 
   let completedAt = existing.completedAt
-  if (data.statusId && data.statusId !== existing.statusId) {
+  if (statusId !== existing.statusId) {
     const oldStatus = await db.select().from(statuses).where(eq(statuses.id, existing.statusId)).get()
-    const newStatus = await db.select().from(statuses).where(eq(statuses.id, data.statusId)).get()
+    const newStatus = await db.select().from(statuses).where(eq(statuses.id, statusId)).get()
     if (newStatus?.isDone && !oldStatus?.isDone) completedAt = new Date()
     else if (!newStatus?.isDone) completedAt = null
   }
 
-  await db.update(tasks).set({ ...data, completedAt }).where(eq(tasks.id, id))
-  return c.json({ ...existing, ...data, completedAt })
+  const update = {
+    ...data,
+    ...(changingProject ? { projectId, statusId, parentTaskId } : {}),
+    completedAt,
+    ...(data.recurrenceInterval !== undefined
+      ? {
+          recurrenceSeriesId: data.recurrenceInterval
+            ? existing.recurrenceSeriesId ?? createId()
+            : null,
+        }
+      : {}),
+  }
+
+  if (changingProject) {
+    const descendantIds = await collectDescendantIds(id)
+    const defaultStatus = await db.select().from(statuses)
+      .where(and(eq(statuses.projectId, projectId), eq(statuses.isDone, false)))
+      .orderBy(asc(statuses.sortOrder))
+      .get()
+      ?? await db.select().from(statuses).where(eq(statuses.projectId, projectId)).orderBy(asc(statuses.sortOrder)).get()
+
+    db.transaction((tx) => {
+      tx.update(tasks).set(update).where(eq(tasks.id, id)).run()
+      if (defaultStatus) {
+        for (const descendantId of descendantIds) {
+          tx.update(tasks).set({
+            projectId,
+            statusId: defaultStatus.id,
+            completedAt: defaultStatus.isDone ? new Date() : null,
+          }).where(eq(tasks.id, descendantId)).run()
+        }
+      }
+    })
+  } else {
+    await db.update(tasks).set(update).where(eq(tasks.id, id))
+  }
+
+  return c.json({ ...existing, ...update })
 })
 
 // Cascade-archives the task's whole subtree (any depth) in one
@@ -311,11 +383,55 @@ router.delete('/:id', async (c) => {
 
   db.transaction((tx) => {
     for (const taskId of idsToArchive) {
-      tx.update(tasks).set({ archived: true }).where(eq(tasks.id, taskId)).run()
+      tx.update(tasks).set({ archived: true, archivedByProject: false }).where(eq(tasks.id, taskId)).run()
     }
   })
 
   return c.json({ ok: true })
+})
+
+router.post('/:id/restore', async (c) => {
+  const user = c.get('user')
+  const { id } = c.req.param()
+  const existing = await db.select().from(tasks)
+    .where(and(eq(tasks.id, id), eq(tasks.userId, user.id)))
+    .get()
+  if (!existing) return c.json({ error: 'Not found' }, 404)
+
+  const project = await db.select().from(projects)
+    .where(and(eq(projects.id, existing.projectId), eq(projects.userId, user.id), eq(projects.archived, false)))
+    .get()
+  if (!project) return c.json({ error: 'Restore the project before restoring its tasks' }, 409)
+
+  if (await hasArchivedAncestor(existing)) {
+    return c.json({ error: 'Restore ancestor tasks first' }, 409)
+  }
+
+  const candidateIds = [id, ...(await collectDescendantIds(id))]
+  const userTasks = await db.select().from(tasks).where(eq(tasks.userId, user.id))
+  const idsToRestore = candidateIds.filter((candidateId) => {
+    const candidate = userTasks.find((task) => task.id === candidateId)
+    if (!candidate) return false
+    if (!candidate.completedAt || !candidate.recurrenceInterval || !candidate.recurrenceSeriesId) return true
+    const nextAnchor = toISODate(computeNextOccurrence(candidate))
+    return !userTasks.some((peer) => (
+      peer.id !== candidate.id
+      && peer.recurrenceSeriesId === candidate.recurrenceSeriesId
+      && peer.recurrenceAnchorDate !== null
+      && peer.recurrenceAnchorDate >= nextAnchor
+    ))
+  })
+  if (!idsToRestore.includes(id)) {
+    return c.json({ error: 'A later recurring occurrence already exists' }, 409)
+  }
+
+  db.transaction((tx) => {
+    for (const taskId of idsToRestore) {
+      tx.update(tasks).set({ archived: false, archivedByProject: false }).where(eq(tasks.id, taskId)).run()
+    }
+  })
+
+  return c.json({ ...existing, archived: false })
 })
 
 // Dedicated, lightweight endpoint for kanban drag-and-drop - avoids
@@ -339,8 +455,40 @@ router.put('/:id/reorder', zValidator('json', reorderSchema), async (c) => {
     else if (!newStatus?.isDone) completedAt = null
   }
 
-  await db.update(tasks).set({ statusId, sortOrder, completedAt }).where(eq(tasks.id, id))
-  return c.json({ ...existing, statusId, sortOrder, completedAt })
+  const parentCondition = existing.parentTaskId === null
+    ? isNull(tasks.parentTaskId)
+    : eq(tasks.parentTaskId, existing.parentTaskId)
+  const siblings = await db.select().from(tasks).where(and(
+    eq(tasks.userId, user.id),
+    eq(tasks.projectId, existing.projectId),
+    eq(tasks.archived, false),
+    parentCondition,
+  )).orderBy(asc(tasks.sortOrder), asc(tasks.createdAt))
+
+  const sourceTasks = siblings.filter((task) => task.statusId === existing.statusId && task.id !== id)
+  const targetTasks = (statusId === existing.statusId
+    ? sourceTasks
+    : siblings.filter((task) => task.statusId === statusId && task.id !== id))
+  const targetIndex = Math.max(0, Math.min(sortOrder, targetTasks.length))
+  const persistedSortOrder = sortOrder > targetTasks.length ? sortOrder : targetIndex
+  const reorderedTarget = [...targetTasks]
+  reorderedTarget.splice(targetIndex, 0, { ...existing, statusId, completedAt })
+
+  db.transaction((tx) => {
+    if (statusId !== existing.statusId) {
+      sourceTasks.forEach((task, index) => {
+        tx.update(tasks).set({ sortOrder: index }).where(eq(tasks.id, task.id)).run()
+      })
+    }
+    reorderedTarget.forEach((task, index) => {
+      tx.update(tasks).set({
+        sortOrder: task.id === id ? persistedSortOrder : index,
+        ...(task.id === id ? { statusId, completedAt } : {}),
+      }).where(eq(tasks.id, task.id)).run()
+    })
+  })
+
+  return c.json({ ...existing, statusId, sortOrder: persistedSortOrder, completedAt })
 })
 
 export { router as tasksRouter }

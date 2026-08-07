@@ -32,9 +32,10 @@ const projectUpdateSchema = z.object({
 
 router.get('/', async (c) => {
   const user = c.get('user')
+  const archived = c.req.query('archived') === 'true'
   return c.json(
     await db.select().from(projects)
-      .where(and(eq(projects.userId, user.id), eq(projects.archived, false))),
+      .where(and(eq(projects.userId, user.id), eq(projects.archived, archived))),
   )
 })
 
@@ -74,10 +75,7 @@ router.put('/:id', zValidator('json', projectUpdateSchema), async (c) => {
   return c.json({ ...existing, ...data })
 })
 
-// Archiving a project archives its tasks too (explicit in the handler,
-// not a DB trigger, so it stays visible/testable) - restoring only
-// un-archives the project itself, an explicit per-task restore avoids
-// silently un-completing everything.
+// Archiving and restoring a project applies to its task tree as one unit.
 router.delete('/:id', async (c) => {
   const user = c.get('user')
   const { id } = c.req.param()
@@ -87,7 +85,9 @@ router.delete('/:id', async (c) => {
 
   db.transaction((tx) => {
     tx.update(projects).set({ archived: true }).where(eq(projects.id, id)).run()
-    tx.update(tasks).set({ archived: true }).where(eq(tasks.projectId, id)).run()
+    tx.update(tasks).set({ archived: true, archivedByProject: true })
+      .where(and(eq(tasks.projectId, id), eq(tasks.archived, false)))
+      .run()
   })
 
   return c.json({ ok: true })
@@ -99,7 +99,12 @@ router.post('/:id/restore', async (c) => {
   const existing = await db.select().from(projects)
     .where(and(eq(projects.id, id), eq(projects.userId, user.id))).get()
   if (!existing) return c.json({ error: 'Not found' }, 404)
-  await db.update(projects).set({ archived: false }).where(eq(projects.id, id))
+  db.transaction((tx) => {
+    tx.update(projects).set({ archived: false }).where(eq(projects.id, id)).run()
+    tx.update(tasks).set({ archived: false, archivedByProject: false })
+      .where(and(eq(tasks.projectId, id), eq(tasks.archivedByProject, true)))
+      .run()
+  })
   return c.json({ ...existing, archived: false })
 })
 

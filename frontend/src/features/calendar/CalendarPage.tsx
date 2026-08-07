@@ -8,6 +8,7 @@ import type { Project } from '../projects/ProjectsPage'
 import type { Status, Task } from '../../lib/types'
 import { PRIORITY_COLORS } from '../../lib/types'
 import { TaskFormModal } from '../tasks/TaskFormModal'
+import { formatDateOnly } from '../../lib/format'
 
 // Index = JS Date#getDay() (0 = Sunday ... 6 = Saturday), so a weekday's
 // label and "is it a weekend" check both key off the same absolute index
@@ -252,7 +253,7 @@ export function CalendarPage() {
       <Modal
         open={!!dayModalDate}
         onClose={() => setDayModalDate(null)}
-        title={dayModalDate ? formatLongDate(dayModalDate) : ''}
+        title={dayModalDate ? formatDateOnly(dayModalDate, { day: 'numeric', month: 'long', year: 'numeric' }) : ''}
         icon={<CalendarIcon size={ICON_SIZE.default} strokeWidth={2} />}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -307,8 +308,4 @@ function NavButton({ onClick, children, wide, ...rest }: {
       {children}
     </button>
   )
-}
-
-function formatLongDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
 }

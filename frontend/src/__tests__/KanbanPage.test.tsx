@@ -1,9 +1,39 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { KanbanPage } from '../features/kanban/KanbanPage'
 import type { Task, Status } from '../lib/types'
+
+const dndState = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }))
+
+vi.mock('@dnd-kit/core', () => ({
+  DndContext: ({ children, ...props }: { children: React.ReactNode } & Record<string, unknown>) => {
+    dndState.props = props
+    return <>{children}</>
+  },
+  DragOverlay: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  PointerSensor: class PointerSensor {},
+  closestCenter: vi.fn(),
+  useSensor: vi.fn(() => ({})),
+  useSensors: vi.fn((...sensors: unknown[]) => sensors),
+  useDroppable: vi.fn(() => ({ setNodeRef: vi.fn(), isOver: false })),
+}))
+
+vi.mock('@dnd-kit/sortable', () => ({
+  SortableContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useSortable: vi.fn(() => ({
+    attributes: {}, listeners: {}, setNodeRef: vi.fn(), transform: null, isDragging: false,
+  })),
+  verticalListSortingStrategy: {},
+}))
+
+vi.mock('@dnd-kit/utilities', () => ({
+  CSS: {
+    Transform: { toString: vi.fn(() => undefined) },
+    Translate: { toString: vi.fn(() => undefined) },
+  },
+}))
 
 // ---------------------------------------------------------------------------
 // Mock the api module
@@ -23,12 +53,14 @@ import { api } from '../lib/api'
 // Mock TanStack Router — KanbanPage reads `project`/`parent` from useSearch.
 // ---------------------------------------------------------------------------
 let mockSearch: Record<string, unknown> = {}
+let mockLinkCalls: Array<Record<string, unknown>> = []
 
 vi.mock('@tanstack/react-router', () => ({
   useSearch: () => mockSearch,
   useNavigate: () => vi.fn(),
   useLocation: () => ({ pathname: '/kanban' }),
   Link: (props: Record<string, unknown>) => {
+    mockLinkCalls.push(props)
     const { to, children } = props as { to: unknown; children?: React.ReactNode }
     return <a href={typeof to === 'string' ? to : JSON.stringify(to)}>{children as React.ReactNode}</a>
   },
@@ -74,11 +106,13 @@ function createWrapper() {
   )
 }
 
-function mockApi(opts: { tasks?: Task[] }) {
+function mockApi(opts: { tasks?: Task[]; allTasks?: Task[] }) {
   vi.mocked(api.get).mockImplementation((path: string) => {
     if (path === '/projects') return Promise.resolve(projects)
     if (path.startsWith('/statuses')) return Promise.resolve(statuses)
-    if (path.startsWith('/tasks')) return Promise.resolve(opts.tasks ?? [])
+    if (path.startsWith('/tasks')) {
+      return Promise.resolve(path.includes('parentTaskId=') ? (opts.tasks ?? []) : (opts.allTasks ?? opts.tasks ?? []))
+    }
     return Promise.resolve([])
   })
 }
@@ -89,6 +123,8 @@ beforeEach(() => {
   vi.mocked(api.put).mockReset()
   vi.mocked(api.delete).mockReset()
   mockSearch = {}
+  mockLinkCalls = []
+  dndState.props = null
 })
 
 // ---------------------------------------------------------------------------
@@ -133,6 +169,44 @@ describe('KanbanPage with a project selected (top level)', () => {
     // Top-level view: parentTaskId filter present but empty.
     expect(String(tasksCall![0])).toMatch(/parentTaskId=(&|$)/)
   })
+
+  it('rolls progress up through every descendant depth', async () => {
+    mockSearch = { project: 'proj-1' }
+    const root = makeTask({ id: 'root', title: 'Root task' })
+    const child = makeTask({ id: 'child', title: 'Child', parentTaskId: root.id })
+    const grandchild = makeTask({
+      id: 'grandchild', title: 'Grandchild', parentTaskId: child.id, statusId: 'status-2',
+    })
+    mockApi({ tasks: [root], allTasks: [root, child, grandchild] })
+
+    render(<KanbanPage />, { wrapper: createWrapper() })
+
+    await screen.findByText('Root task')
+    expect(screen.getByText('1/2')).toBeInTheDocument()
+  })
+
+  it('persists a same-column drag using the target card position', async () => {
+    mockSearch = { project: 'proj-1' }
+    const first = makeTask({ id: 'first', title: 'First', sortOrder: 0 })
+    const second = makeTask({ id: 'second', title: 'Second', sortOrder: 1 })
+    mockApi({ tasks: [first, second] })
+    vi.mocked(api.put).mockResolvedValue({ ...second, sortOrder: 0 })
+
+    render(<KanbanPage />, { wrapper: createWrapper() })
+    await screen.findByText('Second')
+
+    await act(async () => {
+      const onDragEnd = dndState.props?.onDragEnd as ((event: unknown) => void) | undefined
+      expect(onDragEnd).toBeTypeOf('function')
+      onDragEnd!({ active: { id: second.id }, over: { id: first.id } })
+    })
+
+    await vi.waitFor(() => {
+      expect(api.put).toHaveBeenCalledWith(`/tasks/${second.id}/reorder`, {
+        statusId: 'status-1', sortOrder: 0,
+      })
+    })
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -157,6 +231,22 @@ describe('KanbanPage with a project and parent task selected', () => {
       screen.queryAllByRole('link').some((el) => /kanban/i.test(el.getAttribute('href') ?? '') && !/task-1/.test(el.getAttribute('href') ?? '')) ||
       screen.queryAllByRole('button', { name: /назад|back|вверх|up/i }).length > 0
     expect(hasBackUp).toBe(true)
+  })
+
+  it('shows every ancestor in the breadcrumb and links each ancestor level', async () => {
+    mockSearch = { project: 'proj-1', parent: 'grandchild' }
+    const root = makeTask({ id: 'root', title: 'Root ancestor' })
+    const child = makeTask({ id: 'child', title: 'Middle ancestor', parentTaskId: root.id })
+    const grandchild = makeTask({ id: 'grandchild', title: 'Current parent', parentTaskId: child.id })
+    mockApi({ tasks: [], allTasks: [root, child, grandchild] })
+
+    render(<KanbanPage />, { wrapper: createWrapper() })
+
+    await screen.findByText('Current parent')
+    expect(screen.getByText('Root ancestor')).toBeInTheDocument()
+    expect(screen.getByText('Middle ancestor')).toBeInTheDocument()
+    expect(mockLinkCalls.some((props) => JSON.stringify(props.search).includes('root'))).toBe(true)
+    expect(mockLinkCalls.some((props) => JSON.stringify(props.search).includes('child'))).toBe(true)
   })
 })
 

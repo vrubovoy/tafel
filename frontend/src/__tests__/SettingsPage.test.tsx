@@ -18,7 +18,11 @@ vi.mock('../lib/api', () => ({
 
 import { api } from '../lib/api'
 
-const profile = { id: 'user-1', email: 'ivan@example.com', name: 'Иван Петров', weekStartsOn: 1 }
+// weekStartsOnOverride mirrors weekStartsOn here (an explicit Tafel-level
+// choice, not "following the platform default") - the select pre-selects
+// off the override, not the resolved value, so these need to agree for
+// the "pre-selects X" tests below to mean what they say.
+const profile = { id: 'user-1', email: 'ivan@example.com', name: 'Иван Петров', weekStartsOn: 1, weekStartsOnOverride: 1 as 0 | 1 | null }
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -69,7 +73,7 @@ function findSaveButton(): HTMLElement {
 
 describe('SettingsPage week-start selector', () => {
   it('pre-selects "Понедельник" when the fetched profile has weekStartsOn: 1', async () => {
-    mockApiWithProfile({ ...profile, weekStartsOn: 1 })
+    mockApiWithProfile({ ...profile, weekStartsOn: 1, weekStartsOnOverride: 1 })
     render(<SettingsPage />, { wrapper: createWrapper() })
 
     await screen.findByText('Иван Петров')
@@ -82,7 +86,7 @@ describe('SettingsPage week-start selector', () => {
   })
 
   it('pre-selects "Воскресенье" when the fetched profile has weekStartsOn: 0', async () => {
-    mockApiWithProfile({ ...profile, weekStartsOn: 0 })
+    mockApiWithProfile({ ...profile, weekStartsOn: 0, weekStartsOnOverride: 0 })
     render(<SettingsPage />, { wrapper: createWrapper() })
 
     await screen.findByText('Иван Петров')

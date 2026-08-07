@@ -8,10 +8,10 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Plus, ChevronRight, ChevronUp, Calendar as CalendarIcon, Settings } from 'lucide-react'
-import { EmptyState, Button, Badge } from '@zudar107/schloss-ui'
+import { EmptyState, Button, Badge, formatDate } from '@zudar107/schloss-ui'
 import { api } from '../../lib/api'
 import { useToast } from '../../hooks/useToast'
-import { formatDate } from '../../lib/format'
+import { useDateFormat } from '../../hooks/useDateFormat'
 import type { Project } from '../projects/ProjectsPage'
 import type { Status, Task } from '../../lib/types'
 import { PRIORITY_COLORS } from '../../lib/types'
@@ -61,12 +61,27 @@ export function KanbanPage() {
   const childCounts = useMemo(() => {
     const counts = new Map<string, { total: number; done: number }>()
     const doneStatusIds = new Set(statuses.filter((s) => s.isDone).map((s) => s.id))
-    for (const t of allProjectTasks) {
-      if (!t.parentTaskId) continue
-      const entry = counts.get(t.parentTaskId) ?? { total: 0, done: 0 }
-      entry.total++
-      if (doneStatusIds.has(t.statusId)) entry.done++
-      counts.set(t.parentTaskId, entry)
+    const childrenByParent = new Map<string, Task[]>()
+    for (const task of allProjectTasks) {
+      if (!task.parentTaskId) continue
+      const children = childrenByParent.get(task.parentTaskId) ?? []
+      children.push(task)
+      childrenByParent.set(task.parentTaskId, children)
+    }
+    for (const task of allProjectTasks) {
+      const descendants = [...(childrenByParent.get(task.id) ?? [])]
+      const seen = new Set<string>([task.id])
+      let total = 0
+      let done = 0
+      while (descendants.length > 0) {
+        const descendant = descendants.pop()!
+        if (seen.has(descendant.id)) continue
+        seen.add(descendant.id)
+        total++
+        if (doneStatusIds.has(descendant.statusId)) done++
+        descendants.push(...(childrenByParent.get(descendant.id) ?? []))
+      }
+      if (total > 0) counts.set(task.id, { total, done })
     }
     return counts
   }, [allProjectTasks, statuses])
@@ -83,6 +98,19 @@ export function KanbanPage() {
 
   const currentProject = projects.find((p) => p.id === projectId)
   const parentTask = parentTaskId ? allProjectTasks.find((t) => t.id === parentTaskId) : null
+  const ancestorPath = useMemo(() => {
+    if (!parentTask) return []
+    const taskById = new Map(allProjectTasks.map((task) => [task.id, task]))
+    const path: Task[] = []
+    const seen = new Set<string>()
+    let current: Task | undefined = parentTask
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id)
+      path.push(current)
+      current = current.parentTaskId ? taskById.get(current.parentTaskId) : undefined
+    }
+    return path.reverse()
+  }, [allProjectTasks, parentTask])
 
   // Optimistic: without this, a dropped card would sit frozen in its
   // origin column until the PUT round-trips and the refetch resolves,
@@ -128,7 +156,18 @@ export function KanbanPage() {
     const targetStatusId = isColumnId ? overId : tasks.find((t) => t.id === overId)?.statusId
     const task = tasks.find((t) => t.id === taskId)
 
-    if (!targetStatusId || !task || task.statusId === targetStatusId) {
+    if (!targetStatusId || !task || overId === taskId) {
+      setActiveTask(null)
+      return
+    }
+
+    const targetColumnTasks = tasks
+      .filter((candidate) => candidate.statusId === targetStatusId)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+    const targetIndex = isColumnId
+      ? targetColumnTasks.length
+      : targetColumnTasks.findIndex((candidate) => candidate.id === overId)
+    if (targetIndex < 0) {
       setActiveTask(null)
       return
     }
@@ -144,12 +183,36 @@ export function KanbanPage() {
     void qc.cancelQueries({ queryKey: allTasksKey })
     const previousTasks = qc.getQueryData<Task[]>(tasksKey)
     const previousAllTasks = qc.getQueryData<Task[]>(allTasksKey)
-    const patch = (list?: Task[]) => list?.map((t) => (t.id === taskId ? { ...t, statusId: targetStatusId } : t))
+    const patch = (list?: Task[]) => {
+      if (!list) return list
+      const source = list
+        .filter((candidate) => candidate.id !== taskId
+          && candidate.parentTaskId === task.parentTaskId
+          && candidate.statusId === task.statusId)
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+      const target = (targetStatusId === task.statusId
+        ? source
+        : list.filter((candidate) => candidate.id !== taskId
+          && candidate.parentTaskId === task.parentTaskId
+          && candidate.statusId === targetStatusId))
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+      target.splice(Math.min(targetIndex, target.length), 0, { ...task, statusId: targetStatusId })
+
+      const updates = new Map<string, Pick<Task, 'statusId' | 'sortOrder'>>()
+      if (targetStatusId !== task.statusId) {
+        source.forEach((candidate, index) => updates.set(candidate.id, { statusId: candidate.statusId, sortOrder: index }))
+      }
+      target.forEach((candidate, index) => updates.set(candidate.id, { statusId: targetStatusId, sortOrder: index }))
+      return list.map((candidate) => {
+        const update = updates.get(candidate.id)
+        return update ? { ...candidate, ...update } : candidate
+      })
+    }
     qc.setQueryData<Task[]>(tasksKey, patch(previousTasks))
     qc.setQueryData<Task[]>(allTasksKey, patch(previousAllTasks))
     setActiveTask(null)
 
-    reorderMutation.mutate({ id: taskId, statusId: targetStatusId, sortOrder: 0 }, {
+    reorderMutation.mutate({ id: taskId, statusId: targetStatusId, sortOrder: targetIndex }, {
       onError: () => {
         qc.setQueryData(tasksKey, previousTasks)
         qc.setQueryData(allTasksKey, previousAllTasks)
@@ -173,7 +236,12 @@ export function KanbanPage() {
   }
 
   function drillUp() {
-    void navigate({ to: '/kanban', search: { project: projectId } })
+    void navigate({
+      to: '/kanban',
+      search: parentTask?.parentTaskId
+        ? { project: projectId, parent: parentTask.parentTaskId }
+        : { project: projectId },
+    })
   }
 
   if (!projectId) {
@@ -212,17 +280,27 @@ export function KanbanPage() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-          <Link to="/projects" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>Проекты</Link>
+          <Link to="/projects" search={{}} style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>Проекты</Link>
           <ChevronRight size={14} />
           <Link to="/kanban" search={{ project: projectId }} style={{ color: parentTask ? 'var(--text-secondary)' : 'var(--text-primary)', fontWeight: parentTask ? 400 : 600, textDecoration: 'none' }}>
             {currentProject?.name ?? '…'}
           </Link>
-          {parentTask && (
-            <>
+          {ancestorPath.map((ancestor, index) => (
+            <span key={ancestor.id} style={{ display: 'contents' }}>
               <ChevronRight size={14} />
-              <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{parentTask.title}</span>
-            </>
-          )}
+              {index === ancestorPath.length - 1 ? (
+                <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{ancestor.title}</span>
+              ) : (
+                <Link
+                  to="/kanban"
+                  search={{ project: projectId, parent: ancestor.id }}
+                  style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}
+                >
+                  {ancestor.title}
+                </Link>
+              )}
+            </span>
+          ))}
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           {parentTask && (
@@ -362,6 +440,7 @@ function KanbanCardContent({ task, progress, onDrillInto, dragging }: {
   onDrillInto?: () => void
   dragging?: boolean
 }) {
+  const { dateFormat, timezone } = useDateFormat()
   return (
     <div style={{ padding: '0.75rem', cursor: dragging ? 'grabbing' : 'grab' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', marginBottom: task.dueDate || progress ? '0.5rem' : 0 }}>
@@ -371,7 +450,7 @@ function KanbanCardContent({ task, progress, onDrillInto, dragging }: {
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
         {task.dueDate && (
           <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
-            <CalendarIcon size={11} /> {formatDate(task.dueDate)}
+            <CalendarIcon size={11} /> {formatDate(task.dueDate, { dateFormat, timezone })}
           </span>
         )}
         {progress && progress.total > 0 && (

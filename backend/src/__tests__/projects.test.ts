@@ -46,6 +46,17 @@ describe('GET /projects', () => {
     expect(p).toHaveProperty('createdAt')
     expect(p.archived).toBe(false)
   })
+
+  it('lists only archived projects when archived=true', async () => {
+    const active = (await (await post('/projects', { name: 'Active' })).json()) as any
+    const archived = (await (await post('/projects', { name: 'Archived' })).json()) as any
+    await del(`/projects/${archived.id}`)
+
+    const list = (await (await get('/projects?archived=true')).json()) as any[]
+    expect(list.map((project) => project.id)).toEqual([archived.id])
+    expect(list.map((project) => project.id)).not.toContain(active.id)
+    expect(list[0]!.archived).toBe(true)
+  })
 })
 
 describe('POST /projects', () => {
@@ -171,17 +182,30 @@ describe('POST /projects/:id/restore', () => {
     expect(list.find((p) => p.id === project.id)).toBeDefined()
   })
 
-  it('does not un-archive tasks that were archived by the project delete', async () => {
-    const project = (await (await post('/projects', { name: 'RestoreButTasksStay' })).json()) as any
+  it('restores the project task subtree at every depth', async () => {
+    const project = (await (await post('/projects', { name: 'RestoreWithTasks' })).json()) as any
     const statuses = (await (await get(`/statuses?projectId=${project.id}`)).json()) as any[]
     const status = statuses[0]!
-    await post('/tasks', { projectId: project.id, statusId: status.id, title: 'Stays archived' })
+    const parent = (await (
+      await post('/tasks', { projectId: project.id, statusId: status.id, title: 'Parent' })
+    ).json()) as any
+    const child = (await (
+      await post('/tasks', {
+        projectId: project.id, statusId: status.id, title: 'Child', parentTaskId: parent.id,
+      })
+    ).json()) as any
+    const grandchild = (await (
+      await post('/tasks', {
+        projectId: project.id, statusId: status.id, title: 'Grandchild', parentTaskId: child.id,
+      })
+    ).json()) as any
 
     await del(`/projects/${project.id}`)
     await app.request(`/projects/${project.id}/restore`, { method: 'POST', headers: H1 })
 
     const tasks = (await (await get(`/tasks?projectId=${project.id}`)).json()) as any[]
-    expect(tasks).toEqual([])
+    expect(tasks.map((task) => task.id).sort()).toEqual([parent.id, child.id, grandchild.id].sort())
+    expect(tasks.every((task) => task.archived === false)).toBe(true)
   })
 
   it('returns 404 for an unknown id', async () => {
