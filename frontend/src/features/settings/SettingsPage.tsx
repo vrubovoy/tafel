@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Field, Toast } from '@zudar107/schloss-ui'
+import { Button, DirectExportAction, Field, Toast, downloadJson } from '@zudar107/schloss-ui'
 import { api } from '../../lib/api'
 import { useToast } from '../../hooks/useToast'
 
@@ -48,14 +48,9 @@ export function SettingsPage() {
   })
 
   const exportMutation = useMutation({
-    mutationFn: () => api.get<Record<string, unknown>>('/users/export'),
-    onSuccess: (data) => {
-      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }))
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `tafel-export-${new Date().toISOString().slice(0, 10)}.json`
-      link.click()
-      URL.revokeObjectURL(url)
+    mutationFn: async () => {
+      const data = await api.get<Record<string, unknown>>('/exports/me')
+      downloadJson(data, `tafel-export-${new Date().toISOString().slice(0, 10)}.json`)
     },
     onError: () => toast.showError('Не удалось экспортировать данные'),
   })
@@ -119,21 +114,17 @@ export function SettingsPage() {
         <p style={{ margin: '1rem 0 0', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
           Смена пароля и удаление аккаунта — в настройках Schlüssel (доступны через значок профиля в шапке).
         </p>
+      </div>
 
-        <div style={{ borderTop: '1px solid var(--border)', marginTop: '1rem', paddingTop: '1rem' }}>
-          <div className="label">Данные Tafel</div>
-          <p style={{ margin: '0 0 0.75rem', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-            Скачать проекты, статусы и задачи, включая архивные, в формате JSON.
-          </p>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={exportMutation.isPending}
-            onClick={() => exportMutation.mutate()}
-          >
-            {exportMutation.isPending ? 'Подготовка…' : 'Экспортировать данные'}
-          </Button>
-        </div>
+      <div style={{ marginTop: '1rem' }}>
+        <DirectExportAction
+          title="Данные Tafel"
+          description="Скачать проекты, статусы и задачи, включая архивные и историю повторений, в формате JSON."
+          actionLabel="Экспортировать данные"
+          loadingLabel="Подготовка…"
+          loading={exportMutation.isPending}
+          onExport={() => exportMutation.mutateAsync()}
+        />
       </div>
 
       {toast.toast && (

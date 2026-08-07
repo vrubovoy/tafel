@@ -40,9 +40,9 @@ RUN apk add --no-cache python3 make g++
 RUN pnpm install --frozen-lockfile --filter backend --filter @zudar107/schloss-server-kit
 
 # schloss-server-kit is a git submodule, linked via pnpm's workspace:*
-# protocol - consumed as its built dist/ output, so it needs building
-# here before backend imports it (same reasoning as frontend's
-# Dockerfile building schloss-ui from source).
+# protocol - consumed as its built dist/ output, so its auth and strict
+# export-envelope modules need building here before backend imports them
+# (same reasoning as frontend's Dockerfile building schloss-ui from source).
 COPY schloss-server-kit ./schloss-server-kit
 RUN pnpm --filter @zudar107/schloss-server-kit build
 
@@ -63,8 +63,11 @@ RUN pnpm install --prod --frozen-lockfile --filter backend --filter @zudar107/sc
 # schloss-server-kit is consumed as its built dist/ output (see the
 # builder stage) - the --prod install above only links the workspace
 # member, it doesn't rebuild it, so the already-built dist/ is copied
-# in directly. Its node_modules is ALSO copied from the builder - a
-# --prod install strips devDependencies workspace-wide, and hono is
+# in directly. Its node_modules is ALSO copied from the builder. The shared
+# export contract adds jose/zod runtime imports, while hono remains a peer;
+# keeping the package's resolved dependency tree beside dist makes all three
+# resolve from code executing inside schloss-server-kit. The --prod install
+# strips devDependencies workspace-wide, and hono is
 # only a peerDependency (relying on the consumer, backend, to supply
 # it) - backend's own node_modules/hono doesn't help here, since
 # Node's ESM resolution for an import inside

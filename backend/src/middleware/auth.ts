@@ -1,4 +1,4 @@
-import { createAuthMiddleware } from '@zudar107/schloss-server-kit'
+import { createAuthMiddleware, createExportAuthMiddleware } from '@zudar107/schloss-server-kit'
 import type { AuthUser } from '@zudar107/schloss-server-kit'
 import { eq } from 'drizzle-orm'
 import { db } from '../db/index.js'
@@ -25,4 +25,10 @@ export const { requireAuth, requireAdmin } = createAuthMiddleware({
       })
     }
   },
+})
+
+export const requireExportAuth = createExportAuthMiddleware({
+  jwksUrl: JWKS_URL,
+  issuer: ISSUER,
+  service: 'tafel',
 })

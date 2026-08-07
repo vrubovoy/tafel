@@ -85,6 +85,56 @@ describe('OpenAPI user preference schema', () => {
       'archivedByProject', 'createdAt',
     ]))
   })
+
+  it('documents the standardized GET /exports/me envelope and complete snapshot', () => {
+    const schema = jsonResponseSchema('/exports/me')
+
+    expect(schema).toMatchObject({ type: 'object', additionalProperties: false })
+    expect(schema.required).toEqual(expect.arrayContaining([
+      'version', 'service', 'exportedAt', 'data',
+    ]))
+    expect(schema.properties.version).toMatchObject({ type: 'string', enum: ['1'] })
+    expect(schema.properties.service).toMatchObject({ type: 'string', enum: ['tafel'] })
+    expect(schema.properties.exportedAt).toMatchObject({ type: 'string', format: 'date-time' })
+
+    const data = resolveSchema(schema.properties.data)
+    expect(data).toMatchObject({ type: 'object', additionalProperties: false })
+    expect(data.required).toEqual(expect.arrayContaining([
+      'weekStartsOn', 'projects', 'statuses', 'tasks',
+    ]))
+    expect(data.properties.weekStartsOn).toMatchObject({
+      type: 'integer',
+      minimum: 0,
+      maximum: 1,
+      nullable: true,
+    })
+    for (const key of ['projects', 'statuses', 'tasks']) {
+      expect(data.properties[key]).toMatchObject({ type: 'array' })
+    }
+  })
+
+  it('keeps the legacy export documented and describes snapshot and delegated authorization semantics', () => {
+    expect(operation('/users/export', 'get')).toBeDefined()
+
+    const exportOperation = operation('/exports/me', 'get')
+    expect(operation('/users/export', 'get').security).toEqual([{ bearerAuth: [] }])
+    expect(exportOperation.security).toEqual([
+      { bearerAuth: [] },
+      { exportDelegation: [] },
+    ])
+    expect(openApiDocument.components?.securitySchemes?.exportDelegation).toMatchObject({
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'JWT',
+    })
+    expect(exportOperation.responses).toHaveProperty('401')
+    expect(exportOperation.description).toMatch(/single.*snapshot/i)
+    expect(exportOperation.description).toMatch(/archived/i)
+    expect(exportOperation.description).toMatch(/recurrence/i)
+    expect(exportOperation.description).toMatch(/weekStartsOn/i)
+    expect(exportOperation.description).toMatch(/delegat/i)
+    expect(exportOperation.description).toMatch(/audience/i)
+  })
 })
 
 describe('OpenAPI archive and restore contracts', () => {

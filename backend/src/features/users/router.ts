@@ -1,10 +1,11 @@
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
-import { eq, inArray } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { db } from '../../db/index.js'
-import { users, projects, statuses, tasks } from '../../db/schema.js'
+import { users } from '../../db/schema.js'
 import { requireAuth } from '../../middleware/auth.js'
+import { readTafelSnapshot } from '../exports/snapshot.js'
 
 const router = new Hono()
 router.use('*', requireAuth)
@@ -54,19 +55,18 @@ router.get('/me', async (c) => {
 
 router.get('/export', async (c) => {
   const user = c.get('user')
-  const ownedProjects = await db.select().from(projects).where(eq(projects.userId, user.id))
-  const projectIds = ownedProjects.map((project) => project.id)
-  const ownedStatuses = projectIds.length > 0
-    ? await db.select().from(statuses).where(inArray(statuses.projectId, projectIds))
-    : []
-  const ownedTasks = await db.select().from(tasks).where(eq(tasks.userId, user.id))
+  const snapshot = readTafelSnapshot(user.id)
+
+  c.header('Cache-Control', 'no-store, private')
+  c.header('Pragma', 'no-cache')
+  c.header('X-Content-Type-Options', 'nosniff')
 
   return c.json({
     scope: 'tafel-account-only',
     exportedAt: new Date().toISOString(),
-    projects: ownedProjects,
-    statuses: ownedStatuses,
-    tasks: ownedTasks,
+    projects: snapshot.projects,
+    statuses: snapshot.statuses,
+    tasks: snapshot.tasks,
   })
 })
 

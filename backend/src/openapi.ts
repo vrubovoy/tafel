@@ -15,9 +15,17 @@ registry.registerComponent('securitySchemes', 'bearerAuth', {
   type: 'http',
   scheme: 'bearer',
   bearerFormat: 'JWT',
+  description: 'Schlüssel access token with token_use=access.',
+})
+registry.registerComponent('securitySchemes', 'exportDelegation', {
+  type: 'http',
+  scheme: 'bearer',
+  bearerFormat: 'JWT',
+  description: 'Short-lived Schlüssel delegation with token_use=export, the exact data:export scope, and the hof-service:tafel audience.',
 })
 
 const BEARER = [{ bearerAuth: [] }]
+const EXPORT_BEARER: Record<string, string[]>[] = [{ bearerAuth: [] }, { exportDelegation: [] }]
 const idParam = z.object({ id: z.string() })
 const dateTime = z.string().datetime()
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -137,6 +145,24 @@ const exportResponseSchema = z.object({
   statuses: z.array(statusResponseSchema).describe('Statuses belonging to the exported projects'),
   tasks: z.array(taskResponseSchema).describe('All caller-owned tasks, including archived and historical recurrence occurrences'),
 })
+
+const tafelSnapshotSchema = z.object({
+  weekStartsOn: z.number().int().min(0).max(1).nullable().describe(
+    'Nullable Tafel-local week-start override; 0 is Sunday and 1 is Monday',
+  ),
+  projects: z.array(projectResponseSchema).describe('All subject-owned projects, including archived projects'),
+  statuses: z.array(statusResponseSchema).describe('Every status belonging to the exported projects'),
+  tasks: z.array(taskResponseSchema).describe(
+    'All subject-owned tasks, including archived tasks and historical recurrence occurrences',
+  ),
+}).strict()
+
+const standardizedExportResponseSchema = z.object({
+  version: z.literal('1'),
+  service: z.literal('tafel'),
+  exportedAt: dateTime,
+  data: tafelSnapshotSchema,
+}).strict()
 
 const json = (schema: z.ZodType) => ({ content: { 'application/json': { schema } } })
 const error = (description: string) => ({ description, ...json(errorResponseSchema) })
@@ -335,9 +361,18 @@ registry.registerPath({
 })
 registry.registerPath({
   method: 'get', path: '/users/export', tags: ['users'], summary: "Export the current user's Tafel data as JSON",
-  description: 'Exports all caller-owned Tafel projects, their statuses, and tasks, including archived data. It does not export profile data or data from other Hof services.',
+  description: 'Retained synchronous direct Tafel-only JSON contract. Exports all caller-owned projects, their statuses, and tasks, including archived data. It does not export profile data, credentials/tokens, runtime or operational state, other users, or data from other Hof services. The response is private, no-store, and nosniff.',
   security: BEARER,
   responses: { 200: { description: 'OK', content: { 'application/json': { schema: exportResponseSchema } } } },
+})
+registry.registerPath({
+  method: 'get', path: '/exports/me', tags: ['exports'], summary: 'Export a complete versioned Tafel snapshot',
+  description: 'Synchronous direct Tafel JSON endpoint used by Settings and as an input to Schlüssel\'s separate asynchronous ZIP collector. Reads the subject-owned local weekStartsOn override, projects, statuses, and tasks in one local SQLite transaction, including archived rows and recurrence history. Accepts a normal Schlüssel access token or a JWKS-verified delegation with the exact issuer, token_use=export, single hof-service:tafel audience, data:export scope, nonempty subject/job/token IDs, and a non-expired numeric expiry; delegation is rejected by ordinary routes. This is not a cross-service point-in-time snapshot. Account credentials/tokens, runtime configuration, logs, internal operational state, other users, and other services are excluded. The response is private, no-store, and nosniff.',
+  security: EXPORT_BEARER,
+  responses: {
+    200: { description: 'Strict Tafel export envelope version 1', ...json(standardizedExportResponseSchema) },
+    401: error('Missing, invalid, expired, or incorrectly scoped token'),
+  },
 })
 registry.registerPath({
   method: 'put', path: '/users/me', tags: ['users'], summary: "Update the current user's week-start preference",

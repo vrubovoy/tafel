@@ -81,6 +81,13 @@ fit best; add a new section if none fits.
 - `GET /users/export` returns all caller-owned Tafel projects, statuses,
   and tasks, including archived data, under the fixed
   `tafel-account-only` scope.
+- `GET /exports/me` adds the strict shared version 1 Tafel envelope for normal
+  access tokens and exact `hof-service:tafel` export delegations. It scopes
+  solely to the verified principal subject and reads the local week-start
+  override plus all projects, statuses, tasks, archives, and recurrence history
+  in one synchronous SQLite transaction. The legacy `/users/export` response
+  remains unchanged; asynchronous all-services ZIP orchestration is owned by
+  Schlüssel rather than this endpoint.
 - `GET /users/me` now separates effective `weekStartsOn` from nullable
   `weekStartsOnOverride`, while exposing Schlüssel-owned `dateFormat`
   and `timezone` as read-only token values. Sending `null` to
@@ -102,5 +109,7 @@ fit best; add a new section if none fits.
   and drills into that subtree's own board with a breadcrumb trail
   back up), and a month calendar.
 - Shared `TaskFormModal` (create/edit) used by every view.
+- The direct settings-page JSON export remains available and now uses the
+  shared `DirectExportAction` and `downloadJson` primitives with `/exports/me`.
 - Amber accent (`#f59e0b`), distinct from schloss/schlussel/kuvert and
   deliberately not green (the platform's shared "success" color).

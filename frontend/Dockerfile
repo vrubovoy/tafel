@@ -38,8 +38,9 @@ RUN apk add --no-cache python3 make g++
 RUN pnpm install --frozen-lockfile --filter frontend --filter @zudar107/schloss-ui
 
 # schloss-ui is a git submodule, linked via pnpm's workspace:* protocol -
-# still consumed as its built dist/ output (same as when it was a
-# registry package), so it needs building here before frontend imports it.
+# still consumed as its built dist/ output (same as when it was a registry
+# package), so its direct-export action/helper and other components need
+# building here before frontend imports them.
 COPY schloss-ui ./schloss-ui
 RUN pnpm --filter @zudar107/schloss-ui build
 
