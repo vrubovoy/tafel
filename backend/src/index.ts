@@ -15,6 +15,8 @@ import { usersRouter } from './features/users/router.js'
 import { exportsRouter } from './features/exports/router.js'
 import { requireAuth, requireAdmin } from './middleware/auth.js'
 import { openApiDocument } from './openapi.js'
+import { startNotificationOutbox } from './features/notifications/outbox.js'
+import { scanTaskDueNotifications } from './features/notifications/scanner.js'
 
 // Resolved relative to this file so it works both in dev (src/index.ts,
 // migrations at src/db/migrations) and in the compiled build
@@ -51,6 +53,31 @@ app.route('/users', usersRouter)
 app.route('/exports', exportsRouter)
 
 const PORT = Number(process.env['PORT'] ?? 3002)
-serve({ fetch: app.fetch, port: PORT }, () => {
+const server = serve({ fetch: app.fetch, port: PORT }, () => {
   console.log(`[Tafel API] Running on http://localhost:${PORT}`)
 })
+
+const notificationOutboxRuntime = startNotificationOutbox()
+
+// Due-date checks don't need per-second freshness like delivery does -
+// once an hour (configurable) is plenty for a "due today"/"overdue"
+// notification, and the scanner's own dedupe_key makes an extra run
+// harmless anyway. Runs once immediately at boot too, rather than only
+// after the first interval elapses.
+const DUE_SCAN_INTERVAL_MS = Number(process.env['TAFEL_DUE_SCAN_INTERVAL_MS'] ?? 60 * 60_000)
+function runDueScan() {
+  scanTaskDueNotifications().catch((err: unknown) => console.error('[Tafel] Task due-date scan failed', err))
+}
+runDueScan()
+const dueScanTimer = setInterval(runDueScan, DUE_SCAN_INTERVAL_MS)
+
+let shutdownStarted = false
+async function shutdown() {
+  if (shutdownStarted) return
+  shutdownStarted = true
+  server.close()
+  clearInterval(dueScanTimer)
+  await notificationOutboxRuntime.stop()
+}
+process.once('SIGINT', () => { void shutdown() })
+process.once('SIGTERM', () => { void shutdown() })

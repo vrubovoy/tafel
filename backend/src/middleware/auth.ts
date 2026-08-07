@@ -13,7 +13,12 @@ export const { requireAuth, requireAdmin } = createAuthMiddleware({
   jwksUrl: JWKS_URL,
   issuer: ISSUER,
   // Auto-provision a local user row on first sight - Tafel stores only
-  // the user id from the JWT, no passwords here.
+  // the user id from the JWT, no passwords here. Every subsequent
+  // sighting also mirrors the JWT's own timezone claim locally (see
+  // schema.ts's `timezone` column comment for why this needs to live
+  // here, not just be read live off each request) - coalesced rather
+  // than overwritten: a token with no timezone claim (an old cached
+  // token, an admin/service token) never erases an already-known value.
   onUserSeen: async (user) => {
     const existing = await db.select().from(users).where(eq(users.id, user.id)).get()
     if (!existing) {
@@ -21,8 +26,13 @@ export const { requireAuth, requireAdmin } = createAuthMiddleware({
         id: user.id,
         email: user.email,
         name: user.name,
+        timezone: user.timezone ?? null,
         createdAt: new Date(),
       })
+      return
+    }
+    if (user.timezone) {
+      await db.update(users).set({ timezone: user.timezone }).where(eq(users.id, user.id))
     }
   },
 })
