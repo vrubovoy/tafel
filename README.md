@@ -68,7 +68,11 @@ This repo is a pnpm workspace with two packages:
   Schlüssel token on each request, UTC if never seen). Events are queued in a
   transactional outbox and delivered to [`glocke`](https://github.com/zudaR107/glocke),
   the platform's notification service; there is no new HTTP endpoint on Tafel's
-  own API for this — it is outbound-only.
+  own API for this — it is outbound-only. Each candidate is revalidated inside
+  the insert transaction so edits made during a scan cannot enqueue stale
+  notifications. A separate persistent occurrence ledger retains dedupe
+  identities after old delivered and permanently failed outbox rows are pruned
+  in bounded batches; pending and in-flight delivery rows are retained.
 
 ## Behavioral contracts
 
@@ -204,8 +208,14 @@ pnpm --filter frontend lint
 | `SCHLOSS_URL` | Where the header's "На главную" link points; Compose passes it as `VITE_SCHLOSS_URL` |
 | `GLOCKE_BASE_URL` | Where the notification outbox delivers events; unset in Compose defaults to `http://glocke-backend:3004` |
 | `TAFEL_TO_GLOCKE_HMAC_KEY_ID` | Key id Tafel signs outbound Glocke requests with |
-| `TAFEL_TO_GLOCKE_HMAC_SECRET` | Must match Glocke's own `GLOCKE_SOURCE_SECRET_TAFEL` exactly; left unset, due-date events still get recorded but queue up undelivered rather than crashing the service |
+| `TAFEL_TO_GLOCKE_HMAC_SECRET` | Must match Glocke's own `GLOCKE_SOURCE_SECRET_TAFEL` exactly; leaving both HMAC variables unset queues events without delivery, while configuring only one is a startup error |
+| `GLOCKE_OUTBOX_RETENTION_MS` | Retention for delivered and permanently failed outbox rows (default seven days); cleanup is limited to 100 rows per hourly-or-faster pass and continues when delivery credentials are absent |
 | `TAFEL_DUE_SCAN_INTERVAL_MS` | How often the due-date scanner runs (default one hour); it also runs once immediately at boot |
+
+Scan and retention intervals must be positive integer milliseconds no greater
+than `2147483647`; invalid values fail startup before the HTTP server or workers
+start. Graceful shutdown stops new scans and awaits the active scan, HTTP server
+close, and notification dispatcher.
 
 Normal and delegated export tokens use the same `SCHLUSSEL_JWKS_URL` and
 `JWT_ISSUER`; the Tafel delegation audience is fixed by the service as

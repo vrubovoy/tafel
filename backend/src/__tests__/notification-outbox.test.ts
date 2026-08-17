@@ -8,6 +8,19 @@ import { sqlite } from './helpers/db.js'
 
 const KEY_ID_VAR = 'TAFEL_TO_GLOCKE_HMAC_KEY_ID'
 const SECRET_VAR = 'TAFEL_TO_GLOCKE_HMAC_SECRET'
+const CONFIG_VARS = [
+  KEY_ID_VAR,
+  SECRET_VAR,
+  'GLOCKE_BASE_URL',
+  'GLOCKE_OUTBOX_LEASE_MS',
+  'GLOCKE_FETCH_TIMEOUT_MS',
+  'GLOCKE_DISPATCH_INTERVAL_MS',
+  'GLOCKE_WORKER_STOP_TIMEOUT_MS',
+  'GLOCKE_MAX_ATTEMPTS',
+  'GLOCKE_RETRY_BASE_DELAY_MS',
+  'GLOCKE_RETRY_MAX_DELAY_MS',
+  'GLOCKE_OUTBOX_RETENTION_MS',
+] as const
 
 interface OutboxRow {
   id: string
@@ -23,6 +36,7 @@ interface OutboxRow {
   lease_id: string | null
   lease_until: number | null
   delivered_at: number | null
+  permanent_at: number | null
   last_error: string | null
 }
 
@@ -40,6 +54,35 @@ function seedPendingRow(): string {
   return id
 }
 
+function seedRow(options: {
+  id: string
+  state: string
+  createdAt: number
+  deliveredAt?: number | null
+  permanentAt?: number | null
+  nextAttemptAt?: number | null
+  leaseId?: string | null
+  leaseUntil?: number | null
+}) {
+  sqlite.prepare(`
+    INSERT INTO notification_outbox
+      (id, event_type, user_id, payload, correlation_id, dedupe_key, state, created_at,
+       attempts, next_attempt_at, lease_id, lease_until, delivered_at, permanent_at)
+    VALUES (?, 'tafel.task.due.v1', 'user-1', '{}', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+  `).run(
+    options.id,
+    options.id,
+    `dedupe-${options.id}`,
+    options.state,
+    options.createdAt,
+    options.nextAttemptAt ?? null,
+    options.leaseId ?? null,
+    options.leaseUntil ?? null,
+    options.deliveredAt ?? null,
+    options.permanentAt ?? null,
+  )
+}
+
 async function waitFor(
   predicate: () => boolean,
   options: { timeoutMs?: number, intervalMs?: number } = {},
@@ -55,21 +98,22 @@ async function waitFor(
 }
 
 describe('startNotificationOutbox', () => {
-  let savedKeyId: string | undefined
-  let savedSecret: string | undefined
+  let savedConfig: Record<string, string | undefined>
 
   beforeEach(() => {
-    savedKeyId = process.env[KEY_ID_VAR]
-    savedSecret = process.env[SECRET_VAR]
+    savedConfig = Object.fromEntries(CONFIG_VARS.map((name) => [name, process.env[name]]))
+    for (const name of CONFIG_VARS) delete process.env[name]
     sqlite.exec('DELETE FROM notification_outbox')
   })
 
   afterEach(() => {
-    if (savedKeyId === undefined) delete process.env[KEY_ID_VAR]
-    else process.env[KEY_ID_VAR] = savedKeyId
-    if (savedSecret === undefined) delete process.env[SECRET_VAR]
-    else process.env[SECRET_VAR] = savedSecret
+    for (const name of CONFIG_VARS) {
+      const value = savedConfig[name]
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
     vi.unstubAllGlobals()
+    vi.useRealTimers()
   })
 
   it('is a safe no-op when Glocke HMAC credentials are not configured', async () => {
@@ -114,6 +158,7 @@ describe('startNotificationOutbox', () => {
       const row = getRow(id)
       expect(row?.attempts).toBeGreaterThanOrEqual(1)
       expect(typeof row?.last_error).toBe('string')
+      expect(row?.permanent_at).not.toBeNull()
       // Don't assume an exact terminal-state literal - just confirm the row
       // actually moved on from its initial pending/no-error state instead
       // of retrying this same failure forever.
@@ -122,6 +167,88 @@ describe('startNotificationOutbox', () => {
       await runtime.stop()
     }
   }, 10000)
+
+  it.each([
+    ['key ID only', { [KEY_ID_VAR]: 'test-key-id' }],
+    ['secret only', { [SECRET_VAR]: 'd'.repeat(32) }],
+  ])('rejects partially configured credentials with %s instead of silently disabling delivery', (_case, values) => {
+    Object.assign(process.env, values)
+
+    expect(() => startNotificationOutbox()).toThrow(/credential|secret/i)
+  })
+
+  it.each(['0', '-1', '1.5', 'NaN', '2147483648'])(
+    'rejects retention interval %s before starting the delivery worker',
+    async (value) => {
+      process.env[KEY_ID_VAR] = 'test-key-id'
+      process.env[SECRET_VAR] = 'e'.repeat(32)
+      process.env['GLOCKE_OUTBOX_RETENTION_MS'] = value
+      let runtime: ReturnType<typeof startNotificationOutbox> | undefined
+
+      try {
+        expect(() => { runtime = startNotificationOutbox() }).toThrow(/GLOCKE_OUTBOX_RETENTION_MS/)
+      } finally {
+        await runtime?.stop()
+      }
+    },
+  )
+
+  it('removes only delivered and permanent rows older than retention', async () => {
+    process.env[KEY_ID_VAR] = 'test-key-id'
+    process.env[SECRET_VAR] = 'c'.repeat(32)
+    process.env['GLOCKE_OUTBOX_RETENTION_MS'] = String(60 * 60_000)
+    const now = Date.now()
+    const old = now - 2 * 60 * 60_000
+    const fresh = now - 30 * 60_000
+    seedRow({ id: 'old-delivered', state: 'delivered', createdAt: old, deliveredAt: old })
+    seedRow({ id: 'old-permanent', state: 'permanent', createdAt: old, permanentAt: old })
+    seedRow({ id: 'fresh-delivered', state: 'delivered', createdAt: old, deliveredAt: fresh })
+    seedRow({ id: 'fresh-permanent', state: 'permanent', createdAt: old, permanentAt: fresh })
+    seedRow({ id: 'untimestamped-permanent', state: 'permanent', createdAt: old })
+    seedRow({ id: 'old-pending', state: 'pending', createdAt: old, nextAttemptAt: now + 60_000 })
+    seedRow({ id: 'old-inflight', state: 'inflight', createdAt: old, leaseId: 'active', leaseUntil: now + 60_000 })
+    seedRow({ id: 'old-new', state: 'new', createdAt: old })
+    vi.stubGlobal('fetch', vi.fn())
+
+    const runtime = startNotificationOutbox()
+    try {
+      const retainedIds = (sqlite.prepare('SELECT id FROM notification_outbox ORDER BY id').all() as Array<{ id: string }>)
+        .map(({ id }) => id)
+      expect(retainedIds).toEqual([
+        'fresh-delivered',
+        'fresh-permanent',
+        'old-inflight',
+        'old-new',
+        'old-pending',
+        'untimestamped-permanent',
+      ])
+    } finally {
+      await runtime.stop()
+    }
+  })
+
+  it('continues bounded cleanup without credentials and clears its timer on stop', async () => {
+    vi.useFakeTimers()
+    process.env['GLOCKE_OUTBOX_RETENTION_MS'] = String(60 * 60_000)
+    const old = Date.now() - 2 * 60 * 60_000
+    for (let index = 0; index < 201; index += 1) {
+      seedRow({
+        id: `old-${String(index).padStart(3, '0')}`,
+        state: 'permanent',
+        createdAt: old,
+        permanentAt: old,
+      })
+    }
+
+    const runtime = startNotificationOutbox()
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM notification_outbox').get()).toEqual({ count: 101 })
+
+    await vi.advanceTimersByTimeAsync(2 * 60 * 60_000)
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM notification_outbox').get()).toEqual({ count: 0 })
+
+    await runtime.stop()
+    expect(vi.getTimerCount()).toBe(0)
+  })
 
   // Lease-fencing (a claimed row's mark* calls are conditioned on its lease
   // token so a stale/expired lease can't clobber a later claim) is a design

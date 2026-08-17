@@ -17,12 +17,15 @@ import { requireAuth, requireAdmin } from './middleware/auth.js'
 import { openApiDocument } from './openapi.js'
 import { startNotificationOutbox } from './features/notifications/outbox.js'
 import { scanTaskDueNotifications } from './features/notifications/scanner.js'
+import { notificationOutboxStartupConfig, positiveIntervalMs } from './config.js'
 
 // Resolved relative to this file so it works both in dev (src/index.ts,
 // migrations at src/db/migrations) and in the compiled build
 // (dist/index.js, migrations at dist/db/migrations) without a hardcoded
 // path that only matches one of the two.
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const DUE_SCAN_INTERVAL_MS = positiveIntervalMs('TAFEL_DUE_SCAN_INTERVAL_MS', 60 * 60_000)
+notificationOutboxStartupConfig()
 
 migrate(db, { migrationsFolder: join(__dirname, 'db/migrations') })
 
@@ -64,20 +67,31 @@ const notificationOutboxRuntime = startNotificationOutbox()
 // notification, and the scanner's own dedupe_key makes an extra run
 // harmless anyway. Runs once immediately at boot too, rather than only
 // after the first interval elapses.
-const DUE_SCAN_INTERVAL_MS = Number(process.env['TAFEL_DUE_SCAN_INTERVAL_MS'] ?? 60 * 60_000)
+const activeScans = new Set<Promise<void>>()
 function runDueScan() {
-  scanTaskDueNotifications().catch((err: unknown) => console.error('[Tafel] Task due-date scan failed', err))
+  const scan = scanTaskDueNotifications()
+    .then(() => undefined)
+    .catch((err: unknown) => console.error('[Tafel] Task due-date scan failed', err))
+  activeScans.add(scan)
+  void scan.finally(() => activeScans.delete(scan))
 }
 runDueScan()
 const dueScanTimer = setInterval(runDueScan, DUE_SCAN_INTERVAL_MS)
 
-let shutdownStarted = false
-async function shutdown() {
-  if (shutdownStarted) return
-  shutdownStarted = true
-  server.close()
-  clearInterval(dueScanTimer)
-  await notificationOutboxRuntime.stop()
+let shutdownPromise: Promise<void> | undefined
+export function shutdown(): Promise<void> {
+  shutdownPromise ??= (async () => {
+    clearInterval(dueScanTimer)
+    const closeServer = new Promise<void>((resolve, reject) => {
+      server.close((error?: Error) => error ? reject(error) : resolve())
+    })
+    await Promise.all([
+      Promise.all([...activeScans]).then(() => undefined),
+      closeServer,
+      notificationOutboxRuntime.stop(),
+    ])
+  })()
+  return shutdownPromise
 }
 process.once('SIGINT', () => { void shutdown() })
 process.once('SIGTERM', () => { void shutdown() })

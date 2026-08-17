@@ -1,11 +1,14 @@
 import { createNotificationOutboxRuntime, type NotificationOutboxRow } from '@zudar107/schloss-server-kit'
-import { and, asc, eq, isNull, lte, or } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, isNull, lte, or } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
+import { notificationOutboxStartupConfig } from '../../config.js'
 import { db } from '../../db/index.js'
 import { notificationOutbox } from '../../db/schema.js'
 
 const SOURCE = 'tafel'
 const DEFAULT_GLOCKE_BASE_URL = 'http://glocke-backend:3004'
+const CLEANUP_BATCH_SIZE = 100
+const MAX_CLEANUP_INTERVAL_MS = 60 * 60_000
 
 function eligibleAt(nowMs: number) {
   // Picks up both never-attempted rows (nextAttemptAt null/due) and rows
@@ -28,17 +31,49 @@ function eligibleAt(nowMs: number) {
 // createNotificationOutboxRuntime) - this file owns the SQLite
 // transaction/lease-fencing policy the shared runtime deliberately stays
 // agnostic to (dedupe itself is a separate concern, enforced at insert
-// time by notifications/scanner.ts via the dedupe_key unique index).
+// time by notifications/scanner.ts via the occurrence ledger).
 // Returns a no-op stoppable stub (rather than throwing) when the HMAC
 // credentials aren't configured, so a dev/test environment without
 // Glocke set up doesn't crash on boot - events still get recorded, they
 // just queue up undelivered until credentials are added.
 export function startNotificationOutbox() {
-  const keyId = process.env['TAFEL_TO_GLOCKE_HMAC_KEY_ID']
-  const secret = process.env['TAFEL_TO_GLOCKE_HMAC_SECRET']
+  const { keyId, secret, retentionMs } = notificationOutboxStartupConfig()
+
+  function cleanupTerminalRows() {
+    const cutoff = Date.now() - retentionMs
+    const expired = db.select({ id: notificationOutbox.id })
+      .from(notificationOutbox)
+      .where(or(
+        and(
+          eq(notificationOutbox.state, 'delivered'),
+          isNotNull(notificationOutbox.deliveredAt),
+          lte(notificationOutbox.deliveredAt, cutoff),
+        ),
+        and(
+          eq(notificationOutbox.state, 'permanent'),
+          isNotNull(notificationOutbox.permanentAt),
+          lte(notificationOutbox.permanentAt, cutoff),
+        ),
+      ))
+      .orderBy(asc(notificationOutbox.createdAt), asc(notificationOutbox.id))
+      .limit(CLEANUP_BATCH_SIZE)
+      .all()
+    if (expired.length > 0) {
+      db.delete(notificationOutbox).where(inArray(notificationOutbox.id, expired.map(({ id }) => id))).run()
+    }
+  }
+
+  cleanupTerminalRows()
+  function startCleanupTimer() {
+    const timer = setInterval(cleanupTerminalRows, Math.min(retentionMs, MAX_CLEANUP_INTERVAL_MS))
+    timer.unref()
+    return timer
+  }
+
   if (!keyId || !secret) {
+    const cleanupTimer = startCleanupTimer()
     console.warn('[Tafel] TAFEL_TO_GLOCKE_HMAC_KEY_ID/SECRET not configured - notification delivery disabled, events will queue undelivered')
-    return { stop: async () => {} }
+    return { stop: async () => { clearInterval(cleanupTimer) } }
   }
 
   const runtime = createNotificationOutboxRuntime({
@@ -85,7 +120,7 @@ export function startNotificationOutbox() {
     async markDelivered({ id, leaseToken, deliveredAt }) {
       const result = db.update(notificationOutbox).set({
         state: 'delivered', leaseId: null, leaseUntil: null,
-        deliveredAt: deliveredAt.getTime(), lastError: null,
+        deliveredAt: deliveredAt.getTime(), permanentAt: null, lastError: null,
       }).where(and(eq(notificationOutbox.id, id), eq(notificationOutbox.leaseId, leaseToken))).run()
       return result.changes > 0
     },
@@ -93,7 +128,7 @@ export function startNotificationOutbox() {
     async markRetry({ id, leaseToken, attempts, nextAttemptAt, error }) {
       const result = db.update(notificationOutbox).set({
         state: 'pending', attempts, nextAttemptAt: nextAttemptAt.getTime(),
-        leaseId: null, leaseUntil: null, lastError: error,
+        leaseId: null, leaseUntil: null, permanentAt: null, lastError: error,
       }).where(and(eq(notificationOutbox.id, id), eq(notificationOutbox.leaseId, leaseToken))).run()
       return result.changes > 0
     },
@@ -101,12 +136,19 @@ export function startNotificationOutbox() {
     async markPermanent({ id, leaseToken, attempts, error }) {
       const result = db.update(notificationOutbox).set({
         state: 'permanent', attempts, nextAttemptAt: null,
-        leaseId: null, leaseUntil: null, lastError: error,
+        leaseId: null, leaseUntil: null, permanentAt: Date.now(), lastError: error,
       }).where(and(eq(notificationOutbox.id, id), eq(notificationOutbox.leaseId, leaseToken))).run()
       return result.changes > 0
     },
   })
 
   runtime.start()
-  return runtime
+  const cleanupTimer = startCleanupTimer()
+  return {
+    ...runtime,
+    async stop() {
+      clearInterval(cleanupTimer)
+      await runtime.stop()
+    },
+  }
 }
