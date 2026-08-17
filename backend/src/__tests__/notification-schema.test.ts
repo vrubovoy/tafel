@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { dirname, resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
@@ -34,8 +35,14 @@ describe('notification producer schema', () => {
         'lease_id',
         'lease_until',
         'delivered_at',
+        'permanent_at',
         'last_error',
       ]))
+
+      const occurrenceColumns = sqlite.prepare('PRAGMA table_info(notification_occurrences)').all() as Array<{
+        name: string
+      }>
+      expect(occurrenceColumns.map((column) => column.name)).toEqual(['dedupe_key', 'created_at'])
     } finally {
       sqlite.close()
     }
@@ -72,6 +79,76 @@ describe('notification producer schema', () => {
         2,
         2,
       )).toThrow()
+    } finally {
+      sqlite.close()
+    }
+  })
+
+  it('keeps notification occurrence identities unique outside the disposable outbox', () => {
+    const sqlite = new Database(':memory:')
+
+    try {
+      migrate(drizzle(sqlite), { migrationsFolder: migrationsDir })
+      const insert = sqlite.prepare(
+        'INSERT INTO notification_occurrences (dedupe_key, created_at) VALUES (?, ?)',
+      )
+      insert.run('task-1:2026-08-07:overdue', 1)
+
+      expect(() => insert.run('task-1:2026-08-07:overdue', 2)).toThrow()
+    } finally {
+      sqlite.close()
+    }
+  })
+
+  it('backfills durable occurrence identities from an existing outbox', () => {
+    const sqlite = new Database(':memory:')
+
+    try {
+      sqlite.exec(`
+        CREATE TABLE notification_outbox (
+          dedupe_key text PRIMARY KEY NOT NULL,
+          created_at integer NOT NULL
+        );
+        INSERT INTO notification_outbox (dedupe_key, created_at)
+        VALUES ('task-1:2026-08-07:overdue', 1234);
+      `)
+      const migration = readFileSync(resolve(migrationsDir, '0006_little_psylocke.sql'), 'utf8')
+      for (const statement of migration.split('--> statement-breakpoint')) {
+        sqlite.exec(statement)
+      }
+
+      expect(sqlite.prepare('SELECT * FROM notification_occurrences').all()).toEqual([
+        { dedupe_key: 'task-1:2026-08-07:overdue', created_at: 1234 },
+      ])
+    } finally {
+      sqlite.close()
+    }
+  })
+
+  it('backfills a terminal timestamp only for existing permanent rows', () => {
+    const sqlite = new Database(':memory:')
+
+    try {
+      sqlite.exec(`
+        CREATE TABLE notification_outbox (
+          id text PRIMARY KEY NOT NULL,
+          state text NOT NULL,
+          created_at integer NOT NULL
+        );
+        INSERT INTO notification_outbox (id, state, created_at)
+        VALUES ('permanent', 'permanent', 1), ('pending', 'pending', 1);
+      `)
+      const migration = readFileSync(resolve(migrationsDir, '0007_yellow_zzzax.sql'), 'utf8')
+      for (const statement of migration.split('--> statement-breakpoint')) {
+        sqlite.exec(statement)
+      }
+
+      const rows = sqlite.prepare(
+        'SELECT id, permanent_at FROM notification_outbox ORDER BY id',
+      ).all() as Array<{ id: string, permanent_at: number | null }>
+      expect(rows[0]).toEqual({ id: 'pending', permanent_at: null })
+      expect(rows[1]?.id).toBe('permanent')
+      expect(rows[1]?.permanent_at).toBeGreaterThan(0)
     } finally {
       sqlite.close()
     }

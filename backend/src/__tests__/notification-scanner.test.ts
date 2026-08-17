@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../db/index.js', async () => await import('./helpers/db.js'))
 
 import { scanTaskDueNotifications } from '../features/notifications/scanner.js'
-import { cleanDb, sqlite } from './helpers/db.js'
+import { cleanDb, db, sqlite } from './helpers/db.js'
 
 const NOW = new Date('2026-08-08T02:30:00.000Z')
 let nextId = 0
@@ -79,6 +79,7 @@ function outboxRows() {
 
 beforeEach(() => {
   sqlite.exec('DELETE FROM notification_outbox')
+  sqlite.exec('DELETE FROM notification_occurrences')
   cleanDb()
   sqlite.prepare("DELETE FROM users WHERE id NOT IN ('user-1', 'user-2')").run()
   nextId = 0
@@ -167,6 +168,22 @@ describe('task due notification scanner', () => {
     }).sort()).toEqual(['2026-08-08', '2026-08-09'])
   })
 
+  it('does not repeat an overdue occurrence after its terminal outbox row is retained away', async () => {
+    addOwner('owner', 'UTC')
+    addProject('project', 'owner')
+    addStatus('todo', 'project')
+    addTask({ id: 'task', userId: 'owner', projectId: 'project', statusId: 'todo', dueDate: '2026-08-07' })
+
+    expect(await scan()).toBe(1)
+    sqlite.exec('DELETE FROM notification_outbox')
+    expect(await scan(new Date('2026-08-09T12:00:00.000Z'))).toBe(0)
+
+    expect(outboxRows()).toEqual([])
+    expect(sqlite.prepare('SELECT dedupe_key FROM notification_occurrences').all()).toEqual([
+      { dedupe_key: 'task:2026-08-07:overdue' },
+    ])
+  })
+
   it('skips completed, done, archived, project-archived, and undated tasks', async () => {
     addOwner('owner', 'UTC')
     addProject('active-project', 'owner')
@@ -196,5 +213,33 @@ describe('task due notification scanner', () => {
     await scan()
 
     expect(outboxRows()).toEqual([])
+  })
+
+  it.each([
+    ['task', "UPDATE tasks SET archived = 1 WHERE id = 'task'"],
+    ['project', "UPDATE projects SET archived = 1 WHERE id = 'project'"],
+    ['status', "UPDATE statuses SET is_done = 1 WHERE id = 'todo'"],
+    ['due date', "UPDATE tasks SET due_date = '2026-08-09' WHERE id = 'task'"],
+    ['owner timezone', "UPDATE users SET timezone = 'America/Los_Angeles' WHERE id = 'owner'"],
+  ])('transactionally rechecks the current %s before enqueueing a selected candidate', async (_field, mutation) => {
+    addOwner('owner', 'UTC')
+    addProject('project', 'owner')
+    addStatus('todo', 'project')
+    addTask({ id: 'task', userId: 'owner', projectId: 'project', statusId: 'todo', dueDate: '2026-08-08' })
+    const transaction = db.transaction.bind(db)
+    const transactionSpy = vi.spyOn(db, 'transaction').mockImplementation(((callback, config) => {
+      sqlite.exec(mutation)
+      return transaction(callback, config)
+    }) as typeof db.transaction)
+
+    try {
+      const emitted = await scan()
+
+      expect(transactionSpy).toHaveBeenCalled()
+      expect(emitted).toBe(0)
+      expect(outboxRows()).toEqual([])
+    } finally {
+      transactionSpy.mockRestore()
+    }
   })
 })

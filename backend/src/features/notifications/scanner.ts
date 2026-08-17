@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { and, eq, isNull, isNotNull } from 'drizzle-orm'
 import { db } from '../../db/index.js'
-import { tasks, statuses, projects, users, notificationOutbox } from '../../db/schema.js'
+import {
+  tasks, statuses, projects, users, notificationOccurrences, notificationOutbox,
+} from '../../db/schema.js'
 
 const EVENT_TYPE = 'tafel.task.due.v1'
 
@@ -20,8 +22,8 @@ export interface ScanTaskDueNotificationsOptions {
 // tied to any request - "today" is computed per task owner's own
 // timezone (falling back to UTC if never set - see schema.ts's users.timezone
 // comment), not the scanning process's local time. One event per
-// (task, due date, occurrence) via the notification_outbox table's own
-// dedupe_key unique index (Tafel's own dedupe policy - see schema.ts):
+// (task, due date, occurrence) via the persistent notification_occurrences
+// ledger (Tafel's own dedupe policy - see schema.ts):
 // a re-scan of an already-notified task silently no-ops rather than
 // duplicating, while a changed due date naturally produces a fresh key
 // and a fresh notification.
@@ -52,40 +54,73 @@ export async function scanTaskDueNotifications(options: ScanTaskDueNotifications
   const nowMs = nowDate.getTime()
   let emitted = 0
 
-  for (const row of rows) {
-    const dueDate = row.dueDate
-    if (!dueDate) continue // isNotNull above already guarantees this, narrows the type
+  for (const candidate of rows) {
+    const changes = db.transaction((tx) => {
+      // Candidate discovery can race with task edits. Re-read every value that
+      // controls eligibility or payload in the same transaction as the insert.
+      const row = tx.select({
+        taskId: tasks.id,
+        userId: tasks.userId,
+        title: tasks.title,
+        dueDate: tasks.dueDate,
+        timezone: users.timezone,
+      })
+        .from(tasks)
+        .innerJoin(statuses, eq(statuses.id, tasks.statusId))
+        .innerJoin(projects, eq(projects.id, tasks.projectId))
+        .innerJoin(users, eq(users.id, tasks.userId))
+        .where(and(
+          eq(tasks.id, candidate.taskId),
+          isNull(tasks.completedAt),
+          eq(statuses.isDone, false),
+          eq(tasks.archived, false),
+          eq(projects.archived, false),
+          isNotNull(tasks.dueDate),
+        ))
+        .get()
+      const dueDate = row?.dueDate
+      if (!row || !dueDate) return 0
 
-    const today = todayInTimezone(nowDate, row.timezone ?? 'UTC')
-    let occurrence: 'due-today' | 'overdue'
-    if (dueDate === today) occurrence = 'due-today'
-    else if (dueDate < today) occurrence = 'overdue'
-    else continue // due in the future - not yet due
+      const today = todayInTimezone(nowDate, row.timezone ?? 'UTC')
+      let occurrence: 'due-today' | 'overdue'
+      if (dueDate === today) occurrence = 'due-today'
+      else if (dueDate < today) occurrence = 'overdue'
+      else return 0
 
-    const id = createId()
-    const result = await db.insert(notificationOutbox).values({
-      id,
-      eventType: EVENT_TYPE,
-      userId: row.userId,
-      payload: JSON.stringify({
-        recipientId: row.userId,
-        taskTitle: row.title,
-        dueDate,
-        overdue: occurrence === 'overdue',
-      }),
-      correlationId: id,
-      dedupeKey: `${row.taskId}:${dueDate}:${occurrence}`,
-      state: 'pending',
-      createdAt: nowMs,
-      attempts: 0,
-      nextAttemptAt: nowMs,
-      leaseId: null,
-      leaseUntil: null,
-      deliveredAt: null,
-      lastError: null,
-    }).onConflictDoNothing({ target: notificationOutbox.dedupeKey })
+      const id = createId()
+      const dedupeKey = `${row.taskId}:${dueDate}:${occurrence}`
+      const occurrenceInsert = tx.insert(notificationOccurrences)
+        .values({ dedupeKey, createdAt: nowMs })
+        .onConflictDoNothing({ target: notificationOccurrences.dedupeKey })
+        .run()
+      if (occurrenceInsert.changes === 0) return 0
 
-    if (result.changes > 0) emitted += 1
+      tx.insert(notificationOutbox).values({
+        id,
+        eventType: EVENT_TYPE,
+        userId: row.userId,
+        payload: JSON.stringify({
+          recipientId: row.userId,
+          taskTitle: row.title,
+          dueDate,
+          overdue: occurrence === 'overdue',
+        }),
+        correlationId: id,
+        dedupeKey,
+        state: 'pending',
+        createdAt: nowMs,
+        attempts: 0,
+        nextAttemptAt: nowMs,
+        leaseId: null,
+        leaseUntil: null,
+        deliveredAt: null,
+        permanentAt: null,
+        lastError: null,
+      }).run()
+      return 1
+    })
+
+    if (changes > 0) emitted += 1
   }
 
   return emitted

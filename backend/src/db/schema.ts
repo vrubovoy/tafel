@@ -102,17 +102,22 @@ export const tasks = sqliteTable('tasks', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 })
 
-// ── Notification outbox ─────────────────────────────────────────────
+// ── Notifications ───────────────────────────────────────────────────
+// Durable domain-level identity for every due/overdue occurrence. Unlike
+// terminal transport rows, these records are never retention-cleaned.
+export const notificationOccurrences = sqliteTable('notification_occurrences', {
+  dedupeKey: text('dedupe_key').primaryKey(),
+  createdAt: integer('created_at').notNull(),
+})
+
 // Transactional-outbox row for the shared generic dispatcher
 // (@zudar107/schloss-server-kit's createNotificationOutboxRuntime, wired
-// up in notifications/outbox.ts). `dedupe_key` is Tafel's own dedupe
-// policy (deliberately not shared with any other service): the due-date
-// scanner (notifications/scanner.ts) computes it as
+// up in notifications/outbox.ts). `dedupe_key` mirrors Tafel's own dedupe
+// policy in notification_occurrences: the due-date scanner computes it as
 // `${taskId}:${dueDate}:${occurrence}` (occurrence = 'due-today' or
-// 'overdue') and relies on this unique index to make a re-scan of an
-// already-notified task a silent no-op rather than a duplicate event -
-// changing a task's due date naturally produces a fresh key, so the
-// notification fires again for the new date.
+// 'overdue'). The outbox copy remains unique as an additional transport
+// invariant, but is not the durable dedupe identity because terminal outbox
+// rows are deleted after their retention period.
 export const notificationOutbox = sqliteTable('notification_outbox', {
   id: text('id').primaryKey(),
   eventType: text('event_type').notNull(),
@@ -127,6 +132,7 @@ export const notificationOutbox = sqliteTable('notification_outbox', {
   leaseId: text('lease_id'),
   leaseUntil: integer('lease_until'),
   deliveredAt: integer('delivered_at'),
+  permanentAt: integer('permanent_at'),
   lastError: text('last_error'),
 }, (table) => [
   uniqueIndex('notification_outbox_dedupe_key_unique').on(table.dedupeKey),
@@ -137,4 +143,5 @@ export type User = typeof users.$inferSelect
 export type Project = typeof projects.$inferSelect
 export type Status = typeof statuses.$inferSelect
 export type Task = typeof tasks.$inferSelect
+export type NotificationOccurrence = typeof notificationOccurrences.$inferSelect
 export type NotificationOutboxRow = typeof notificationOutbox.$inferSelect

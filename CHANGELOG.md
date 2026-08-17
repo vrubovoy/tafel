@@ -37,6 +37,15 @@ fit best; add a new section if none fits.
   read) - both map to the same SQL `integer` column either way.
 
 ## API
+- Due-date notification candidates are now re-read transactionally immediately
+  before outbox deduplication, preventing task, project, status, due-date, or
+  owner-timezone edits during a scan from producing stale events. Startup now
+  rejects invalid scan/retention intervals and partial Glocke HMAC credentials,
+  a persistent occurrence ledger preserves dedupe after terminal outbox
+  retention, delivered and permanent retention ages are measured from their
+  respective settlement timestamps, cleanup continues in bounded batches even
+  without delivery credentials, and graceful shutdown awaits active scans,
+  HTTP closure, and dispatcher termination while stopping all owned timers.
 - `GET /tasks` drill-in filtering: `parentTaskId=` (empty) → top-level
   only, a real id → that task's direct children, omitted → every depth.
 - `GET /projects?archived=true` lists archived projects;
