@@ -1,15 +1,24 @@
+import { useState } from 'react'
 import { Menu } from 'lucide-react'
-import { Header as SharedHeader, ThemeToggle } from '@zudar107/schloss-ui'
+import {
+  Header as SharedHeader,
+  normalizeNotificationOrigin,
+  ThemeToggle,
+  useUnreadNotifications,
+} from '@zudar107/schloss-ui'
 import { buildSchluesselAccountUrl } from '../lib/authRedirect'
 import type { AuthUser } from '../hooks/useAuth'
+import { apiClient } from '../lib/api'
 
 // Where "На главную" links back to (schloss) - separate from
 // VITE_SCHLUSSEL_URL, which points the other way (to the login page).
 const SCHLOSS_URL: string = (import.meta.env.VITE_SCHLOSS_URL as string | undefined) ?? 'http://localhost:3000'
+const GLOCKE_URL: string = (import.meta.env.VITE_GLOCKE_URL as string | undefined) ?? 'http://localhost:5177'
+const GLOCKE_ORIGIN = normalizeNotificationOrigin(GLOCKE_URL)
 
 interface HeaderProps {
   user: AuthUser | null
-  onLogout: () => void
+  onLogout: () => void | Promise<void>
   onOpenMobileMenu: () => void
 }
 
@@ -17,6 +26,18 @@ interface HeaderProps {
 // identity/settings/logout) is hidden below the mobile breakpoint, so
 // this sits alongside its own controls rather than replacing them.
 export function Header({ user, onLogout, onOpenMobileMenu }: HeaderProps) {
+  const [loggingOut, setLoggingOut] = useState(false)
+  const notificationState = useUnreadNotifications({
+    glockeOrigin: GLOCKE_ORIGIN ?? '',
+    userId: loggingOut ? null : user?.id ?? null,
+    apiClient,
+  })
+
+  function handleLogout() {
+    setLoggingOut(true)
+    void Promise.resolve(onLogout()).catch(() => setLoggingOut(false))
+  }
+
   return (
     <SharedHeader
       // The home link leads to schloss (Tafel has no home page of its
@@ -37,7 +58,10 @@ export function Header({ user, onLogout, onOpenMobileMenu }: HeaderProps) {
       // Tafel's own /settings route, which is service-specific
       // preferences and stays reachable from the sidebar.
       onSettings={() => { window.location.href = buildSchluesselAccountUrl(window.location.pathname) }}
-      onLogout={onLogout}
+      onLogout={handleLogout}
+      notifications={user && !loggingOut && GLOCKE_ORIGIN
+        ? { href: `${GLOCKE_ORIGIN}/notifications`, state: notificationState }
+        : undefined}
       rightSlot={<ThemeToggle />}
       leftSlot={
         <button

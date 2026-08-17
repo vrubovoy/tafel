@@ -112,6 +112,9 @@ fit best; add a new section if none fits.
   and seed `recurrenceSeriesId` from each existing recurring task's id.
 
 ## Frontend
+- The authenticated shared header now links its notification bell to Glocke
+  and displays Glocke's unread count using the existing in-memory access token.
+  The browser-facing Glocke origin is configured at frontend build time.
 - Three views over one task/project data model: a recursive expandable
   list tree, a `@dnd-kit`-based kanban board (columns are the current
   project's own statuses; a card with children shows a progress badge

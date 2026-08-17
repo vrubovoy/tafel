@@ -206,6 +206,7 @@ pnpm --filter frontend lint
 | `TAFEL_ALLOWED_ORIGINS` | Comma-separated CORS allowlist; Compose maps it to the backend's `ALLOWED_ORIGINS` |
 | `SCHLUSSEL_WEB_URL` | Where sign-in redirects; Compose passes it as the frontend build's `VITE_SCHLUSSEL_URL` |
 | `SCHLOSS_URL` | Where the header's "На главную" link points; Compose passes it as `VITE_SCHLOSS_URL` |
+| `GLOCKE_URL` | Browser-facing Glocke origin for the header notification bell and unread-count request; Compose passes it as `VITE_GLOCKE_URL` |
 | `GLOCKE_BASE_URL` | Where the notification outbox delivers events; unset in Compose defaults to `http://glocke-backend:3004` |
 | `TAFEL_TO_GLOCKE_HMAC_KEY_ID` | Key id Tafel signs outbound Glocke requests with |
 | `TAFEL_TO_GLOCKE_HMAC_SECRET` | Must match Glocke's own `GLOCKE_SOURCE_SECRET_TAFEL` exactly; leaving both HMAC variables unset queues events without delivery, while configuring only one is a startup error |
@@ -226,7 +227,7 @@ allow previously issued access tokens to expire before deploying this version.
 When running the packages directly instead of through Compose, defaults support
 the standard local ports. Override them with `DATABASE_PATH`, `ALLOWED_ORIGINS`,
 `SCHLUSSEL_JWKS_URL`, `JWT_ISSUER`, `VITE_SCHLUSSEL_URL`, and
-`VITE_SCHLOSS_URL` on the respective process. The names above are the host-side
+`VITE_SCHLOSS_URL`, and `VITE_GLOCKE_URL` on the respective process. The names above are the host-side
 Compose configuration used by `.env.example`; `VITE_*` values are fixed at
 frontend build time.
 
