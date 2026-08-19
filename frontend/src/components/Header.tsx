@@ -60,7 +60,7 @@ export function Header({ user, onLogout, onOpenMobileMenu }: HeaderProps) {
       onSettings={() => { window.location.href = buildSchluesselAccountUrl(window.location.pathname) }}
       onLogout={handleLogout}
       notifications={user && !loggingOut && GLOCKE_ORIGIN
-        ? { href: `${GLOCKE_ORIGIN}/notifications`, state: notificationState }
+        ? { href: `${GLOCKE_ORIGIN}/notifications`, state: notificationState, glockeOrigin: GLOCKE_ORIGIN, apiClient }
         : undefined}
       rightSlot={<ThemeToggle />}
       leftSlot={
