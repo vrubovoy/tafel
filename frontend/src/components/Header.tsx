@@ -4,6 +4,7 @@ import {
   Header as SharedHeader,
   normalizeNotificationOrigin,
   ThemeToggle,
+  useAvatarUrl,
   useUnreadNotifications,
 } from '@zudar107/schloss-ui'
 import { buildSchluesselAccountUrl } from '../lib/authRedirect'
@@ -15,6 +16,7 @@ import { apiClient } from '../lib/api'
 const SCHLOSS_URL: string = (import.meta.env.VITE_SCHLOSS_URL as string | undefined) ?? 'http://localhost:3000'
 const GLOCKE_URL: string = (import.meta.env.VITE_GLOCKE_URL as string | undefined) ?? 'http://localhost:5177'
 const GLOCKE_ORIGIN = normalizeNotificationOrigin(GLOCKE_URL)
+const SCHLUSSEL_URL: string = (import.meta.env.VITE_SCHLUSSEL_URL as string | undefined) ?? 'http://localhost:4001'
 
 interface HeaderProps {
   user: AuthUser | null
@@ -29,6 +31,11 @@ export function Header({ user, onLogout, onOpenMobileMenu }: HeaderProps) {
   const [loggingOut, setLoggingOut] = useState(false)
   const notificationState = useUnreadNotifications({
     glockeOrigin: GLOCKE_ORIGIN ?? '',
+    userId: loggingOut ? null : user?.id ?? null,
+    apiClient,
+  })
+  const avatarUrl = useAvatarUrl({
+    schluesselOrigin: SCHLUSSEL_URL,
     userId: loggingOut ? null : user?.id ?? null,
     apiClient,
   })
@@ -52,7 +59,7 @@ export function Header({ user, onLogout, onOpenMobileMenu }: HeaderProps) {
       }
       homeHref={SCHLOSS_URL}
       homeTitle="На главную"
-      user={user}
+      user={user ? { ...user, avatarUrl } : null}
       // The header's gear icon opens the platform-wide account settings
       // hosted on schlussel (password, delete account, ...) - NOT
       // Tafel's own /settings route, which is service-specific
