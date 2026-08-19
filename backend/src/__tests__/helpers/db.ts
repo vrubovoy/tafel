@@ -42,6 +42,6 @@ export const db = drizzle(sqlite, { schema })
  * (tasks references statuses/projects, statuses references projects).
  */
 export function cleanDb() {
-  const tables = ['tasks', 'statuses', 'projects']
+  const tables = ['tasks', 'statuses', 'projects', 'notification_outbox', 'notification_occurrences']
   for (const t of tables) sqlite.exec(`DELETE FROM ${t}`)
 }

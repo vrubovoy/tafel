@@ -1,11 +1,14 @@
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
-import { eq, and, isNull, isNotNull, gte, lte, asc, sql } from 'drizzle-orm'
+import { eq, and, ne, isNull, isNotNull, gte, lte, asc, sql } from 'drizzle-orm'
 import { createId } from '@paralleldrive/cuid2'
+import { randomUUID } from 'node:crypto'
 import { db } from '../../db/index.js'
-import { tasks, projects, statuses, type Task } from '../../db/schema.js'
+import { tasks, projects, statuses, notificationOutbox, type Task } from '../../db/schema.js'
 import { requireAuth } from '../../middleware/auth.js'
+
+const PROJECT_COMPLETED_EVENT_TYPE = 'tafel.project.completed.v1'
 
 const router = new Hono()
 router.use('*', requireAuth)
@@ -78,6 +81,63 @@ async function checkStatusOwnership(projectId: string, statusId: string): Promis
     .where(and(eq(statuses.id, statusId), eq(statuses.projectId, projectId))).get()
   if (!status) return Response.json({ error: 'Status not found in this project' }, { status: 404 })
   return null
+}
+
+// Inserted in the SAME db.transaction() as the task update that completed
+// the project (see checkProjectCompletion below) - mirrors kuvert's own
+// insertGoalCompletionEvent pattern.
+function emitProjectCompletedEvent(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  userId: string,
+  projectName: string,
+): void {
+  const id = randomUUID()
+  const now = Date.now()
+  tx.insert(notificationOutbox).values({
+    id,
+    eventType: PROJECT_COMPLETED_EVENT_TYPE,
+    userId,
+    payload: JSON.stringify({ recipientId: userId, projectName }),
+    correlationId: id,
+    // No durable occurrence ledger needed here unlike the due-date scanner
+    // (features/notifications/scanner.ts): that one re-evaluates every
+    // candidate on a timer and needs cross-restart dedupe, while this
+    // fires at most once per request, directly on the exact transition
+    // that completed the project - the dedupe key only has to be unique.
+    dedupeKey: id,
+    state: 'pending',
+    createdAt: now,
+    attempts: 0,
+    nextAttemptAt: now,
+    leaseId: null,
+    leaseUntil: null,
+    deliveredAt: null,
+    permanentAt: null,
+    lastError: null,
+  }).run()
+}
+
+// Fires tafel.project.completed.v1 exactly on the transition from "at
+// least one open (non-archived, incomplete) task" to "zero open tasks,
+// project non-empty" - computed fresh from sibling task state on every
+// call rather than a stored "already notified" flag, so it re-arms on
+// its own if new work is added to an already-completed project and later
+// finished again (same wasComplete/nowComplete-by-computation shape as
+// kuvert's goal completion, see goals/router.ts).
+function checkProjectCompletion(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  excludeTaskId: string,
+  projectId: string,
+  userId: string,
+): void {
+  const others = tx.select({ completedAt: tasks.completedAt }).from(tasks)
+    .where(and(eq(tasks.projectId, projectId), eq(tasks.archived, false), ne(tasks.id, excludeTaskId)))
+    .all()
+  if (others.some((task) => task.completedAt === null)) return
+
+  const project = tx.select({ name: projects.name }).from(projects).where(eq(projects.id, projectId)).get()
+  if (!project) return
+  emitProjectCompletedEvent(tx, userId, project.name)
 }
 
 // Walks up from `newParentId`'s own ancestor chain via a recursive CTE -
@@ -322,10 +382,11 @@ router.put('/:id', zValidator('json', taskUpdateSchema), async (c) => {
   }
 
   let completedAt = existing.completedAt
+  let becameDone = false
   if (statusId !== existing.statusId) {
     const oldStatus = await db.select().from(statuses).where(eq(statuses.id, existing.statusId)).get()
     const newStatus = await db.select().from(statuses).where(eq(statuses.id, statusId)).get()
-    if (newStatus?.isDone && !oldStatus?.isDone) completedAt = new Date()
+    if (newStatus?.isDone && !oldStatus?.isDone) { completedAt = new Date(); becameDone = true }
     else if (!newStatus?.isDone) completedAt = null
   }
 
@@ -361,9 +422,13 @@ router.put('/:id', zValidator('json', taskUpdateSchema), async (c) => {
           }).where(eq(tasks.id, descendantId)).run()
         }
       }
+      if (becameDone) checkProjectCompletion(tx, id, projectId, user.id)
     })
   } else {
-    await db.update(tasks).set(update).where(eq(tasks.id, id))
+    db.transaction((tx) => {
+      tx.update(tasks).set(update).where(eq(tasks.id, id)).run()
+      if (becameDone) checkProjectCompletion(tx, id, projectId, user.id)
+    })
   }
 
   return c.json({ ...existing, ...update })
@@ -448,10 +513,11 @@ router.put('/:id/reorder', zValidator('json', reorderSchema), async (c) => {
   if (statusError) return statusError
 
   let completedAt = existing.completedAt
+  let becameDone = false
   if (statusId !== existing.statusId) {
     const oldStatus = await db.select().from(statuses).where(eq(statuses.id, existing.statusId)).get()
     const newStatus = await db.select().from(statuses).where(eq(statuses.id, statusId)).get()
-    if (newStatus?.isDone && !oldStatus?.isDone) completedAt = new Date()
+    if (newStatus?.isDone && !oldStatus?.isDone) { completedAt = new Date(); becameDone = true }
     else if (!newStatus?.isDone) completedAt = null
   }
 
@@ -485,6 +551,7 @@ router.put('/:id/reorder', zValidator('json', reorderSchema), async (c) => {
         sortOrder: task.id === id ? persistedSortOrder : index,
         ...(task.id === id ? { statusId, completedAt } : {}),
       }).where(eq(tasks.id, task.id)).run()
+      if (task.id === id && becameDone) checkProjectCompletion(tx, id, existing.projectId, user.id)
     })
   })
 
