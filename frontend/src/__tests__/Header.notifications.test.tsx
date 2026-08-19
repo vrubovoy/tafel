@@ -15,6 +15,26 @@ function unreadResponse(count: number): Response {
   })
 }
 
+function profileResponse(): Response {
+  return new Response(JSON.stringify({ avatarDataUrl: null }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+// The Header now also fires an independent GET .../auth/profile fetch
+// (useAvatarUrl) alongside the unread-count one - route by URL so both
+// get their own fresh Response (a single shared Response instance's body
+// can only be read once, which broke when two hooks both tried to read
+// the same mocked instance) without changing what each test is actually
+// asserting about the unread-count endpoint specifically.
+function routedFetch(unreadHandler: () => Response | Promise<Response>): ReturnType<typeof vi.fn> {
+  return vi.fn((input: RequestInfo | URL) => {
+    if (String(input).includes('/auth/profile')) return Promise.resolve(profileResponse())
+    return Promise.resolve(unreadHandler())
+  })
+}
+
 async function renderHeader(options: {
   user?: AuthUser | null
   token?: string | null
@@ -49,19 +69,22 @@ afterEach(() => {
 
 describe('authenticated Header Glocke bell', () => {
   it('links the shared bell to VITE_GLOCKE_URL /notifications', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(unreadResponse(0)))
+    vi.stubGlobal('fetch', routedFetch(() => unreadResponse(0)))
     await renderHeader()
 
     expect(await screen.findByRole('link', { name: 'Уведомления: непрочитанных нет' })).toHaveAttribute('href', notificationUrl)
   })
 
   it('omits the bell and unread request for an invalid Glocke origin', async () => {
-    const fetchMock = vi.fn()
+    const fetchMock = routedFetch(() => { throw new Error('unread-count should not be fetched') })
     vi.stubGlobal('fetch', fetchMock)
     await renderHeader({ glockeOrigin: 'javascript:alert(1)' })
 
     await Promise.resolve()
-    expect(fetchMock).not.toHaveBeenCalled()
+    // An invalid Glocke origin only suppresses the unread-count fetch and
+    // the bell itself - the avatar fetch (useAvatarUrl) targets Schlüssel
+    // independently and is unaffected.
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('unread-count'))).toBe(false)
     expect(screen.queryByRole('link', { name: /уведомления|notifications/i })).not.toBeInTheDocument()
   })
 
@@ -70,7 +93,7 @@ describe('authenticated Header Glocke bell', () => {
     { count: 7, label: '7' },
     { count: 100, label: '99+' },
   ])('renders the unread count state for $count', async ({ count, label }) => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(unreadResponse(count)))
+    vi.stubGlobal('fetch', routedFetch(() => unreadResponse(count)))
     await renderHeader()
     const accessibleName = count === 0
       ? 'Уведомления: непрочитанных нет'
@@ -92,12 +115,12 @@ describe('authenticated Header Glocke bell', () => {
   })
 
   it('uses the existing in-memory token only as a Bearer Authorization header', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(unreadResponse(3))
+    const fetchMock = routedFetch(() => unreadResponse(3))
     vi.stubGlobal('fetch', fetchMock)
     await renderHeader({ token: 'memory-token' })
 
     await screen.findByRole('link', { name: 'Уведомления: непрочитанных — 3' })
-    const [input, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const [input, init] = fetchMock.mock.calls.find(([url]) => String(url) === unreadUrl) as [string, RequestInit]
     const headers = new Headers(init.headers)
     expect(input).toBe(unreadUrl)
     expect(input).not.toContain('memory-token')
