@@ -1,6 +1,8 @@
 import { createRouter, createRootRouteWithContext, createRoute, Outlet, redirect } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
+import { NotFoundPage } from '@zudar107/schloss-ui'
 import { Layout } from '../components/Layout'
+import { HeroIllustration } from '../components/HeroIllustration'
 import { KanbanPage } from '../features/kanban/KanbanPage'
 import { TaskListPage } from '../features/tasks/TaskListPage'
 import { CalendarPage } from '../features/calendar/CalendarPage'
@@ -37,6 +39,7 @@ function prefetch(loader: (queryClient: QueryClient) => Promise<unknown>) {
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: () => <Outlet />,
+  notFoundComponent: () => <NotFoundPage homeHref="/" illustration={<HeroIllustration size={100} />} />,
 })
 
 const authCallbackRoute = createRoute({
