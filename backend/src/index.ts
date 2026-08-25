@@ -18,6 +18,7 @@ import { openApiDocument } from './openapi.js'
 import { startNotificationOutbox } from './features/notifications/outbox.js'
 import { scanTaskDueNotifications } from './features/notifications/scanner.js'
 import { notificationOutboxStartupConfig, positiveIntervalMs } from './config.js'
+import { deletionsRouter } from './features/deletions/router.js'
 
 // Resolved relative to this file so it works both in dev (src/index.ts,
 // migrations at src/db/migrations) and in the compiled build
@@ -54,6 +55,7 @@ app.route('/tasks', tasksRouter)
 app.route('/stats', statsRouter)
 app.route('/users', usersRouter)
 app.route('/exports', exportsRouter)
+app.route('/internal/v1', deletionsRouter)
 
 const PORT = Number(process.env['PORT'] ?? 3002)
 const server = serve({ fetch: app.fetch, port: PORT }, () => {

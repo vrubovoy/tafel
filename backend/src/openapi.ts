@@ -23,6 +23,10 @@ registry.registerComponent('securitySchemes', 'exportDelegation', {
   bearerFormat: 'JWT',
   description: 'Short-lived Schlüssel delegation with token_use=export, the exact data:export scope, and the hof-service:tafel audience.',
 })
+registry.registerComponent('securitySchemes', 'deletionAuth', {
+  type: 'http', scheme: 'bearer', bearerFormat: 'JWT',
+  description: 'Short-lived Schlüssel deletion token with exact hof-deletion:tafel audience and account:delete scope.',
+})
 
 const BEARER = [{ bearerAuth: [] }]
 const EXPORT_BEARER: Record<string, string[]>[] = [{ bearerAuth: [] }, { exportDelegation: [] }]
@@ -389,6 +393,16 @@ registry.registerPath({
   responses: {
     200: { description: 'Updated profile', ...json(userProfileResponseSchema) },
     400: invalid('weekStartsOn is missing or invalid'),
+  },
+})
+
+registry.registerPath({
+  method: 'post', path: '/internal/v1/account-deletions', tags: ['internal'], summary: 'Idempotently purge a deleted account',
+  security: [{ deletionAuth: [] }], request: { body: { content: { 'application/json': { schema: z.object({ jobId: z.string(), userId: z.string() }).strict() } } } },
+  responses: {
+    200: { description: 'Deletion completed or exact replay accepted' },
+    401: { description: 'Missing, invalid, expired, or incorrectly scoped token' },
+    409: { description: 'Token, payload, job, or subject identity conflict' },
   },
 })
 
