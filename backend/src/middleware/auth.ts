@@ -2,7 +2,7 @@ import { createAuthMiddleware, createExportAuthMiddleware } from '@zudar107/schl
 import type { AuthUser } from '@zudar107/schloss-server-kit'
 import { eq } from 'drizzle-orm'
 import { db } from '../db/index.js'
-import { users } from '../db/schema.js'
+import { users, userTombstones } from '../db/schema.js'
 
 export type { AuthUser }
 
@@ -20,20 +20,25 @@ export const { requireAuth, requireAdmin } = createAuthMiddleware({
   // than overwritten: a token with no timezone claim (an old cached
   // token, an admin/service token) never erases an already-known value.
   onUserSeen: async (user) => {
-    const existing = await db.select().from(users).where(eq(users.id, user.id)).get()
-    if (!existing) {
-      await db.insert(users).values({
+    const deleted = db.transaction((tx) => {
+      const tombstone = tx.select({ userId: userTombstones.userId })
+        .from(userTombstones).where(eq(userTombstones.userId, user.id)).get()
+      if (tombstone) return true
+      const existing = tx.select().from(users).where(eq(users.id, user.id)).get()
+      if (!existing) {
+        tx.insert(users).values({
         id: user.id,
         email: user.email,
         name: user.name,
         timezone: user.timezone ?? null,
         createdAt: new Date(),
-      })
-      return
-    }
-    if (user.timezone) {
-      await db.update(users).set({ timezone: user.timezone }).where(eq(users.id, user.id))
-    }
+        }).run()
+      } else if (user.timezone) {
+        tx.update(users).set({ timezone: user.timezone }).where(eq(users.id, user.id)).run()
+      }
+      return false
+    })
+    if (deleted) throw new Error('Deleted account')
   },
 })
 
