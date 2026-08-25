@@ -21,7 +21,7 @@
     "@zudar107/schloss-server-kit": "workspace:*",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.32",
+    "hono": "^4.13.3",
     "jose": "^6.1.3",
     "zod": "^4.4.3"
   },
