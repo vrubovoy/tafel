@@ -25,10 +25,10 @@ interface HeaderProps {
 // this sits alongside its own controls rather than replacing them.
 export function Header({ user, onLogout, onOpenMobileMenu }: HeaderProps) {
   const [loggingOut, setLoggingOut] = useState(false)
-  const { schlossUrl, glockeUrl, schlusselUrl } = getRuntimeConfig()
+  const { schlossUrl, glockeUrl, schlusselUrl, services } = getRuntimeConfig()
   const notificationState = useUnreadNotifications({
     glockeOrigin: glockeUrl,
-    userId: loggingOut ? null : user?.id ?? null,
+    userId: loggingOut || !services.glocke ? null : user?.id ?? null,
     apiClient,
   })
   const avatarUrl = useAvatarUrl({
@@ -63,7 +63,7 @@ export function Header({ user, onLogout, onOpenMobileMenu }: HeaderProps) {
       // preferences and stays reachable from the sidebar.
       onSettings={() => { window.location.href = buildSchluesselAccountUrl(window.location.pathname) }}
       onLogout={handleLogout}
-      notifications={user && !loggingOut
+      notifications={user && !loggingOut && services.glocke
         ? { href: `${glockeUrl}/notifications`, state: notificationState, glockeOrigin: glockeUrl, apiClient }
         : undefined}
       rightSlot={<ThemeToggle />}
