@@ -1,15 +1,11 @@
 // Thin, Tafel-named wrapper around @zudar107/schloss-ui's config-driven
-// auth-redirect helpers. Reads import.meta.env.VITE_SCHLUSSEL_URL fresh on
-// every call (not memoized at module load) so it keeps honoring a value
-// changed after the module was first imported (e.g. via test env stubbing).
+// auth-redirect helpers. Reads runtime config on every call so changes made
+// after module import (including test stubs) are honored.
 import { buildLoginUrl, buildLogoutUrl, buildAccountUrl, CODE_VERIFIER_STORAGE_KEY } from '@zudar107/schloss-ui'
-
-const DEFAULT_SCHLUSSEL_URL = 'http://localhost:4001'
+import { getRuntimeConfig } from './runtimeConfig'
 
 function config() {
-  return {
-    schluesselUrl: (import.meta.env.VITE_SCHLUSSEL_URL as string | undefined) ?? DEFAULT_SCHLUSSEL_URL,
-  }
+  return { schluesselUrl: getRuntimeConfig().schlusselUrl }
 }
 
 export { CODE_VERIFIER_STORAGE_KEY }

@@ -36,8 +36,8 @@ function eligibleAt(nowMs: number) {
 // credentials aren't configured, so a dev/test environment without
 // Glocke set up doesn't crash on boot - events still get recorded, they
 // just queue up undelivered until credentials are added.
-export function startNotificationOutbox() {
-  const { keyId, secret, retentionMs } = notificationOutboxStartupConfig()
+export function startNotificationOutbox(config = notificationOutboxStartupConfig()) {
+  const { keyId, secret, retentionMs } = config
 
   function cleanupTerminalRows() {
     const cutoff = Date.now() - retentionMs

@@ -10,7 +10,8 @@ const lifecycle = vi.hoisted(() => ({
 
 vi.mock('@hono/node-server', () => ({ serve: lifecycle.serve }))
 vi.mock('drizzle-orm/better-sqlite3/migrator', () => ({ migrate: vi.fn() }))
-vi.mock('../db/index.js', () => ({ db: {} }))
+vi.mock('../db/index.js', () => ({ db: {}, sqlite: {} }))
+vi.mock('../db/migrate.js', () => ({ prepareDatabase: vi.fn() }))
 vi.mock('../features/notifications/outbox.js', () => ({ startNotificationOutbox: lifecycle.startOutbox }))
 vi.mock('../features/notifications/scanner.js', () => ({ scanTaskDueNotifications: lifecycle.scan }))
 vi.mock('../middleware/auth.js', () => ({ requireAuth: vi.fn(), requireAdmin: vi.fn() }))
