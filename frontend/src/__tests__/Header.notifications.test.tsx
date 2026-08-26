@@ -40,9 +40,14 @@ async function renderHeader(options: {
   token?: string | null
   onLogout?: () => void | Promise<void>
   glockeOrigin?: string
+  glockeEnabled?: boolean
 } = {}) {
   vi.resetModules()
-  window.__HOF_CONFIG__ = { schemaVersion: 1, glockeUrl: options.glockeOrigin ?? glockeUrl }
+  window.__HOF_CONFIG__ = {
+    schemaVersion: 1,
+    glockeUrl: options.glockeOrigin ?? glockeUrl,
+    services: { glocke: options.glockeEnabled ?? true },
+  }
   const [{ Header }, { setAccessToken }] = await Promise.all([
     import('../components/Header'),
     import('../lib/api'),
@@ -98,6 +103,16 @@ describe('authenticated Header Glocke bell', () => {
 
     await Promise.resolve()
     expect(fetchMock).not.toHaveBeenCalled()
+    expect(screen.queryByRole('link', { name: /уведомления|notifications/i })).not.toBeInTheDocument()
+  })
+
+  it('does not request unread state or render the bell when Glocke is disabled in this deployment', async () => {
+    const fetchMock = routedFetch(() => unreadResponse(3))
+    vi.stubGlobal('fetch', fetchMock)
+    await renderHeader({ glockeEnabled: false })
+
+    await Promise.resolve()
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === unreadUrl)).toBe(false)
     expect(screen.queryByRole('link', { name: /уведомления|notifications/i })).not.toBeInTheDocument()
   })
 

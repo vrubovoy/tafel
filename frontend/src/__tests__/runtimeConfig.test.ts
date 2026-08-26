@@ -13,7 +13,24 @@ describe('runtime config', () => {
       schlusselUrl: 'http://localhost:4001',
       schlossUrl: 'http://localhost:3000',
       glockeUrl: 'http://localhost:5177',
+      services: { glocke: true },
     })
+  })
+
+  it('defaults services.glocke to true when missing or malformed', () => {
+    window.__HOF_CONFIG__ = { schemaVersion: 1 }
+    expect(getRuntimeConfig().services).toEqual({ glocke: true })
+
+    window.__HOF_CONFIG__ = { schemaVersion: 1, services: { glocke: 'nope' } }
+    expect(getRuntimeConfig().services).toEqual({ glocke: true })
+
+    window.__HOF_CONFIG__ = { schemaVersion: 1, services: 'nope' }
+    expect(getRuntimeConfig().services).toEqual({ glocke: true })
+  })
+
+  it('reads services.glocke: false', () => {
+    window.__HOF_CONFIG__ = { schemaVersion: 1, services: { glocke: false } }
+    expect(getRuntimeConfig().services).toEqual({ glocke: false })
   })
 
   it('normalizes origins and reads changes on demand', () => {

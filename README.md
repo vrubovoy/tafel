@@ -209,7 +209,7 @@ pnpm --filter frontend lint
 | `TAFEL_ALLOWED_ORIGINS` | Comma-separated CORS allowlist; Compose maps it to the backend's `ALLOWED_ORIGINS` |
 | `SCHLUSSEL_WEB_URL` | Where sign-in redirects; the frontend container writes it to runtime `/config.js` at startup |
 | `SCHLOSS_URL` | Where the header's "На главную" link points; written to runtime `/config.js` |
-| `GLOCKE_URL` | Browser-facing Glocke origin for the header notification bell and unread-count request; written to runtime `/config.js` |
+| `GLOCKE_URL` | Browser-facing Glocke origin for the header notification bell and unread-count request; written to runtime `/config.js` along with a derived `services.glocke` flag - leaving it unset hides the bell entirely instead of pointing it at a dev default |
 | `GLOCKE_BASE_URL` | Where the notification outbox delivers events; unset in Compose defaults to `http://glocke-backend:3004` |
 | `TAFEL_TO_GLOCKE_HMAC_KEY_ID` | Key id Tafel signs outbound Glocke requests with |
 | `TAFEL_TO_GLOCKE_HMAC_SECRET` | Must match Glocke's own `GLOCKE_SOURCE_SECRET_TAFEL` exactly; leaving both HMAC variables unset queues events without delivery, while configuring only one is a startup error |

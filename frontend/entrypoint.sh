@@ -10,7 +10,8 @@ trap 'rm -f "$tmp"' EXIT HUP INT TERM
     --arg schlusselUrl "${SCHLUSSEL_WEB_URL:-http://localhost:4001}" \
     --arg schlossUrl "${SCHLOSS_URL:-http://localhost:3000}" \
     --arg glockeUrl "${GLOCKE_URL:-http://localhost:5177}" \
-    '{schemaVersion: 1, $schlusselUrl, $schlossUrl, $glockeUrl}'
+    --argjson glockeEnabled "$([ -n "${GLOCKE_URL:-}" ] && echo true || echo false)" \
+    '{schemaVersion: 1, $schlusselUrl, $schlossUrl, $glockeUrl, services: {glocke: $glockeEnabled}}'
   printf ';\n'
 } > "$tmp"
 
