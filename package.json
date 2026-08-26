@@ -10,6 +10,7 @@
     "dev:frontend": "pnpm --filter frontend dev",
     "build": "pnpm --filter backend build && pnpm --filter frontend build",
     "db:generate": "pnpm --filter backend db:generate",
-    "db:migrate": "pnpm --filter backend db:migrate"
+    "db:migrate": "pnpm --filter backend db:migrate",
+    "db:migrate:dev": "pnpm --filter backend db:migrate:dev"
   }
 }

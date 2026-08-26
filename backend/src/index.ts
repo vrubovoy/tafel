@@ -6,7 +6,8 @@ import { bodyLimit } from 'hono/body-limit'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { sqlite } from './db/index.js'
-import { prepareDatabase } from './db/migrate.js'
+import { assertDatabaseCurrent, prepareDatabase } from './db/migrate.js'
+import { buildInfo } from './build-info.js'
 import { projectsRouter } from './features/projects/router.js'
 import { statusesRouter } from './features/statuses/router.js'
 import { tasksRouter } from './features/tasks/router.js'
@@ -41,7 +42,15 @@ app.use('*', bodyLimit({
 app.use('*', logger())
 app.use('*', createCorsMiddleware({ allowedOrigins: ALLOWED_ORIGINS }))
 
-app.get('/health', (c) => c.json({ status: 'ok', service: 'Tafel' }))
+app.get('/health', (c) => c.json({ status: 'ok', service: 'Tafel', ...buildInfo }))
+app.get('/ready', (c) => {
+  try {
+    assertDatabaseCurrent(sqlite, join(__dirname, 'db/migrations'))
+    return c.json({ status: 'ready', service: 'Tafel' })
+  } catch {
+    return c.json({ status: 'unavailable', service: 'Tafel' }, 503)
+  }
+})
 
 // Reached from tafel/frontend's own /docs page as /backend/openapi.json
 // (the frontend container's Caddyfile already proxies /backend/* here
