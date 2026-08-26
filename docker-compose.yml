@@ -18,6 +18,8 @@ services:
     environment:
       PORT: 3002
       DATABASE_PATH: ${TAFEL_DATABASE_PATH:-/data/tafel.db}
+      SERVICE_VERSION: ${TAFEL_SERVICE_VERSION:-}
+      BUILD_SHA: ${TAFEL_BUILD_SHA:-}
       SCHLUSSEL_JWKS_URL: ${SCHLUSSEL_JWKS_URL:-http://schlussel:4000/.well-known/jwks.json}
       # Must match schlussel's own JWT_ISSUER (hardcoded to "schlussel" in
       # schlussel/docker-compose.yml).
@@ -34,7 +36,7 @@ services:
       # tuning-knob names as every other producer, so one shared .env
       # default applies identically everywhere. Left unset, due-date
       # events still get recorded but queue up undelivered.
-      GLOCKE_BASE_URL: ${GLOCKE_BASE_URL:-http://glocke-backend:3004}
+      GLOCKE_BASE_URL: ${GLOCKE_BASE_URL:-}
       TAFEL_TO_GLOCKE_HMAC_KEY_ID: ${TAFEL_TO_GLOCKE_HMAC_KEY_ID:-}
       TAFEL_TO_GLOCKE_HMAC_SECRET: ${TAFEL_TO_GLOCKE_HMAC_SECRET:-}
       GLOCKE_DISPATCH_INTERVAL_MS: ${GLOCKE_DISPATCH_INTERVAL_MS:-1000}
@@ -51,7 +53,7 @@ services:
     networks:
       - schloss-net
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3002/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3002/ready"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -63,7 +65,7 @@ services:
     environment:
       SCHLUSSEL_WEB_URL: ${SCHLUSSEL_WEB_URL:-https://auth.localhost}
       SCHLOSS_URL: ${SCHLOSS_URL:-https://localhost}
-      GLOCKE_URL: ${GLOCKE_URL:-https://glocke.localhost}
+      GLOCKE_URL: ${GLOCKE_URL:-}
     restart: unless-stopped
     networks:
       - schloss-net

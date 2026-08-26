@@ -23,7 +23,7 @@ export function assertDatabaseCurrent(sqlite: Database.Database, folder: string)
 }
 
 export function prepareDatabase(sqlite: Database.Database, folder: string, flag = process.env['MIGRATE_ON_STARTUP']): void {
-  if (flag === undefined || flag === '' || flag === 'true') migrateDatabase(sqlite, folder)
-  else if (flag === 'false') assertDatabaseCurrent(sqlite, folder)
+  if (flag === 'true') migrateDatabase(sqlite, folder)
+  else if (flag === undefined || flag === '' || flag === 'false') assertDatabaseCurrent(sqlite, folder)
   else throw new Error('MIGRATE_ON_STARTUP must be true or false')
 }
