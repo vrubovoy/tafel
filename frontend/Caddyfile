@@ -2,6 +2,14 @@
 	root * /srv
 	encode gzip zstd
 
+	@runtimeConfig path /config.js
+	handle @runtimeConfig {
+		root * /config
+		header Content-Type "application/javascript; charset=utf-8"
+		header Cache-Control "no-store"
+		file_server
+	}
+
 	@authCallback path /auth/callback*
 	handle @authCallback {
 		try_files {path} /index.html

@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "node dist/migrate.js",
+    "db:migrate:dev": "drizzle-kit migrate",
     "lint": "oxlint",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"

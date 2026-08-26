@@ -5,8 +5,8 @@ import { createCorsMiddleware } from '@zudar107/schloss-server-kit'
 import { bodyLimit } from 'hono/body-limit'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
-import { db } from './db/index.js'
+import { sqlite } from './db/index.js'
+import { prepareDatabase } from './db/migrate.js'
 import { projectsRouter } from './features/projects/router.js'
 import { statusesRouter } from './features/statuses/router.js'
 import { tasksRouter } from './features/tasks/router.js'
@@ -26,9 +26,8 @@ import { deletionsRouter } from './features/deletions/router.js'
 // path that only matches one of the two.
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const DUE_SCAN_INTERVAL_MS = positiveIntervalMs('TAFEL_DUE_SCAN_INTERVAL_MS', 60 * 60_000)
-notificationOutboxStartupConfig()
-
-migrate(db, { migrationsFolder: join(__dirname, 'db/migrations') })
+const outboxConfig = notificationOutboxStartupConfig()
+prepareDatabase(sqlite, join(__dirname, 'db/migrations'))
 
 const ALLOWED_ORIGINS = (process.env['ALLOWED_ORIGINS'] ?? 'http://localhost:5175')
   .split(',').map((o) => o.trim())
@@ -62,7 +61,7 @@ const server = serve({ fetch: app.fetch, port: PORT }, () => {
   console.log(`[Tafel API] Running on http://localhost:${PORT}`)
 })
 
-const notificationOutboxRuntime = startNotificationOutbox()
+const notificationOutboxRuntime = startNotificationOutbox(outboxConfig)
 
 // Due-date checks don't need per-second freshness like delivery does -
 // once an hour (configurable) is plenty for a "due today"/"overdue"

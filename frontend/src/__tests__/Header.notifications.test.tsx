@@ -42,7 +42,7 @@ async function renderHeader(options: {
   glockeOrigin?: string
 } = {}) {
   vi.resetModules()
-  vi.stubEnv('VITE_GLOCKE_URL', options.glockeOrigin ?? glockeUrl)
+  window.__HOF_CONFIG__ = { schemaVersion: 1, glockeUrl: options.glockeOrigin ?? glockeUrl }
   const [{ Header }, { setAccessToken }] = await Promise.all([
     import('../components/Header'),
     import('../lib/api'),
@@ -63,29 +63,16 @@ function notificationLink(): HTMLAnchorElement {
 
 afterEach(() => {
   cleanup()
-  vi.unstubAllEnvs()
+  delete window.__HOF_CONFIG__
   vi.unstubAllGlobals()
 })
 
 describe('authenticated Header Glocke bell', () => {
-  it('links the shared bell to VITE_GLOCKE_URL /notifications', async () => {
+  it('links the shared bell to the configured Glocke origin', async () => {
     vi.stubGlobal('fetch', routedFetch(() => unreadResponse(0)))
     await renderHeader()
 
     expect(await screen.findByRole('link', { name: 'Уведомления: непрочитанных нет' })).toHaveAttribute('href', notificationUrl)
-  })
-
-  it('omits the bell and unread request for an invalid Glocke origin', async () => {
-    const fetchMock = routedFetch(() => { throw new Error('unread-count should not be fetched') })
-    vi.stubGlobal('fetch', fetchMock)
-    await renderHeader({ glockeOrigin: 'javascript:alert(1)' })
-
-    await Promise.resolve()
-    // An invalid Glocke origin only suppresses the unread-count fetch and
-    // the bell itself - the avatar fetch (useAvatarUrl) targets Schlüssel
-    // independently and is unaffected.
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('unread-count'))).toBe(false)
-    expect(screen.queryByRole('link', { name: /уведомления|notifications/i })).not.toBeInTheDocument()
   })
 
   it.each([

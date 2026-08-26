@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Menu } from 'lucide-react'
 import {
   Header as SharedHeader,
-  normalizeNotificationOrigin,
   ThemeToggle,
   useAvatarUrl,
   useUnreadNotifications,
@@ -10,13 +9,10 @@ import {
 import { buildSchluesselAccountUrl } from '../lib/authRedirect'
 import type { AuthUser } from '../hooks/useAuth'
 import { apiClient } from '../lib/api'
+import { getRuntimeConfig } from '../lib/runtimeConfig'
 
 // Where "На главную" links back to (schloss) - separate from
-// VITE_SCHLUSSEL_URL, which points the other way (to the login page).
-const SCHLOSS_URL: string = (import.meta.env.VITE_SCHLOSS_URL as string | undefined) ?? 'http://localhost:3000'
-const GLOCKE_URL: string = (import.meta.env.VITE_GLOCKE_URL as string | undefined) ?? 'http://localhost:5177'
-const GLOCKE_ORIGIN = normalizeNotificationOrigin(GLOCKE_URL)
-const SCHLUSSEL_URL: string = (import.meta.env.VITE_SCHLUSSEL_URL as string | undefined) ?? 'http://localhost:4001'
+// schlusselUrl, which points the other way (to the login page).
 
 interface HeaderProps {
   user: AuthUser | null
@@ -29,13 +25,14 @@ interface HeaderProps {
 // this sits alongside its own controls rather than replacing them.
 export function Header({ user, onLogout, onOpenMobileMenu }: HeaderProps) {
   const [loggingOut, setLoggingOut] = useState(false)
+  const { schlossUrl, glockeUrl, schlusselUrl } = getRuntimeConfig()
   const notificationState = useUnreadNotifications({
-    glockeOrigin: GLOCKE_ORIGIN ?? '',
+    glockeOrigin: glockeUrl,
     userId: loggingOut ? null : user?.id ?? null,
     apiClient,
   })
   const avatarUrl = useAvatarUrl({
-    schluesselOrigin: SCHLUSSEL_URL,
+    schluesselOrigin: schlusselUrl,
     userId: loggingOut ? null : user?.id ?? null,
     apiClient,
   })
@@ -57,7 +54,7 @@ export function Header({ user, onLogout, onOpenMobileMenu }: HeaderProps) {
           <path d="M7 11V7a5 5 0 0 1 10 0v4" />
         </svg>
       }
-      homeHref={SCHLOSS_URL}
+      homeHref={schlossUrl}
       homeTitle="На главную"
       user={user ? { ...user, avatarUrl } : null}
       // The header's gear icon opens the platform-wide account settings
@@ -66,8 +63,8 @@ export function Header({ user, onLogout, onOpenMobileMenu }: HeaderProps) {
       // preferences and stays reachable from the sidebar.
       onSettings={() => { window.location.href = buildSchluesselAccountUrl(window.location.pathname) }}
       onLogout={handleLogout}
-      notifications={user && !loggingOut && GLOCKE_ORIGIN
-        ? { href: `${GLOCKE_ORIGIN}/notifications`, state: notificationState, glockeOrigin: GLOCKE_ORIGIN, apiClient }
+      notifications={user && !loggingOut
+        ? { href: `${glockeUrl}/notifications`, state: notificationState, glockeOrigin: glockeUrl, apiClient }
         : undefined}
       rightSlot={<ThemeToggle />}
       leftSlot={

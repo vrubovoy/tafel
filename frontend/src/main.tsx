@@ -5,6 +5,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { AuthContext, useAuthProvider } from './hooks/useAuth'
 import { router } from './router'
 import { queryClient } from './lib/queryClient'
+import { getRuntimeConfig } from './lib/runtimeConfig'
 import { applyTheme, getStoredTheme, ThemeSync } from '@zudar107/schloss-ui'
 import './index.css'
 
@@ -12,16 +13,15 @@ import './index.css'
 // lib/authRedirect.ts) - it doubles as the theme-sync API's origin since
 // Tafel's own localStorage can't be read from schloss's or schlussel's
 // origin directly.
-const SCHLUSSEL_URL: string = (import.meta.env.VITE_SCHLUSSEL_URL as string | undefined) ?? 'http://localhost:4001'
-
 applyTheme(getStoredTheme())
 
 function Root() {
   const auth = useAuthProvider()
+  const { schlusselUrl } = getRuntimeConfig()
 
   // Mounted unconditionally, before the auth-loading check below - theme
   // sync has nothing to do with being signed in, and shouldn't wait on it.
-  const themeSync = <ThemeSync apiOrigin={SCHLUSSEL_URL} />
+  const themeSync = <ThemeSync apiOrigin={schlusselUrl} />
 
   if (auth.loading) {
     return (
