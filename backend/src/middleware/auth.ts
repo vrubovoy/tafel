@@ -6,7 +6,7 @@ import { users, userTombstones } from '../db/schema.js'
 
 export type { AuthUser }
 
-const JWKS_URL = process.env['SCHLUSSEL_JWKS_URL'] ?? 'http://localhost:4000/.well-known/jwks.json'
+export const JWKS_URL = process.env['SCHLUSSEL_JWKS_URL'] ?? 'http://localhost:4000/.well-known/jwks.json'
 const ISSUER = process.env['JWT_ISSUER'] ?? 'schlussel'
 
 export const { requireAuth, requireAdmin } = createAuthMiddleware({

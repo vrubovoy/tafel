@@ -1,5 +1,13 @@
 import { createMiddleware } from 'hono/factory'
 
+// Mirrors the real middleware/auth.ts export - readiness tests set
+// SCHLUSSEL_JWKS_URL before importing anything so this points at a real
+// (or deliberately failing) test server instead of the production
+// default. Needed here too, not just the real file, since helpers/setup.ts
+// imports JWKS_URL from '../../middleware/auth.js', which vi.mock
+// redirects to this module for the whole test run.
+export const JWKS_URL = process.env['SCHLUSSEL_JWKS_URL'] ?? 'http://localhost:4000/.well-known/jwks.json'
+
 type TestUser = {
   id: string
   email: string
